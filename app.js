@@ -4,8 +4,14 @@
 // Only light / fan / climate / scene / script / media_player / vacuum / lock entities are shown — never switches or plugs.
 (function () {
   'use strict';
-  var HUB = 'http://192.168.3.96:8099';
+  var HUBQ = (location.search.match(/[?&]hub=([^&]+)/) || [])[1];            // dev/test override only (never set on the TV)
+  var HUB = HUBQ ? decodeURIComponent(HUBQ) : 'http://192.168.3.96:8099';
   var DEMO = /[?&]demo\b/.test(location.search);
+  var keysSeen = 0;
+  // diagnostics: tiny beacons to the hub service so a failure on the TV is visible from the PC (LAN only)
+  function beacon(section, data) { try { fetch(HUB + '/probe', { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ section: 'hub.' + section, data: data }) }).catch(function () {}); } catch (e) {} }
+  window.addEventListener('error', function (e) { beacon('error', { msg: e.message, at: (e.filename || '') + ':' + e.lineno }); });
+  window.addEventListener('unhandledrejection', function (e) { beacon('rejection', String(e.reason)); });
   var PAGES = [
     { id: 'lights',  title: 'Lights',   domains: ['light'] },
     { id: 'climate', title: 'Climate',  domains: ['climate', 'fan'] },
@@ -44,16 +50,16 @@
     if (DEMO) { loadDemo(); setStatus('demo data', 'ok'); render(); return; }
     var ctl = new AbortController(); setTimeout(function () { ctl.abort(); }, 5000);
     fetch(HUB + '/ha-token', { cache: 'no-store', signal: ctl.signal }).then(function (r) { if (!r.ok) throw new Error('token service ' + r.status); return r.json(); })
-      .then(function (cfg) { open(cfg); })
-      .catch(function (e) { canDemo = true; setStatus('cannot reach the hub service (' + e.message + ') — retrying', 'bad'); showMsg('Cannot reach the laptop hub service. Retrying every 6 s…   Press OK to preview the layout with demo data.'); setTimeout(connect, 6000); });
+      .then(function (cfg) { beacon('token', { ok: true, ws: cfg.ws }); open(cfg); })
+      .catch(function (e) { beacon('token', { ok: false, err: String(e) }); canDemo = true; setStatus('cannot reach the hub service (' + e.message + ') — retrying', 'bad'); showMsg('Cannot reach the laptop hub service. Retrying every 6 s…   Press OK to preview the layout with demo data.'); setTimeout(connect, 6000); });
   }
   function open(cfg) {
     ws = new WebSocket(cfg.ws);
     ws.onmessage = function (ev) {
       var m = JSON.parse(ev.data);
       if (m.type === 'auth_required') { ws.send(JSON.stringify({ type: 'auth', access_token: cfg.token })); }
-      else if (m.type === 'auth_invalid') { setStatus('HA rejected the TV token', 'bad'); showMsg('Home Assistant rejected the TV token.'); }
-      else if (m.type === 'auth_ok') { start(); }
+      else if (m.type === 'auth_invalid') { beacon('auth', 'invalid'); setStatus('HA rejected the TV token', 'bad'); showMsg('Home Assistant rejected the TV token.'); }
+      else if (m.type === 'auth_ok') { beacon('auth', 'ok'); start(); }
       else if (m.type === 'result' && pending[m.id]) { var p = pending[m.id]; delete pending[m.id]; m.success ? p.resolve(m.result) : p.reject(new Error((m.error && m.error.message) || 'error')); }
       else if (m.type === 'event' && m.event && m.event.event_type === 'state_changed') { onChanged(m.event.data); }
     };
@@ -64,7 +70,7 @@
     Promise.all([request({ type: 'get_states' }), request({ type: 'subscribe_events', event_type: 'state_changed' })]).then(function (r) {
       r[0].forEach(function (s) { states[s.entity_id] = s; });
       return loadAreas();
-    }).then(function () { setStatus('connected', 'ok'); render(); }).catch(function (e) { setStatus('load failed: ' + e.message, 'bad'); });
+    }).then(function () { beacon('loaded', { states: Object.keys(states).length, areaMapped: Object.keys(entArea).length }); setStatus('connected', 'ok'); render(); }).catch(function (e) { beacon('loadfail', String(e)); setStatus('load failed: ' + e.message, 'bad'); });
   }
   function loadAreas() {   // best effort: areas make the lists readable; non-admin users may not be allowed some of these
     var areas = {}, devArea = {};
@@ -118,6 +124,7 @@
     Object.keys(states).filter(function (e) { return doms.indexOf(dom(e)) >= 0 && eligible(e); }).forEach(function (e) {
       var area = (entArea[e] && entArea[e] !== '\u0000hidden') ? entArea[e] : 'Other'; (groups[area] = groups[area] || []).push(e); count++;
     });
+    beacon('render', { page: page, tiles: count });
     if (!count) { showMsg('Nothing to show here.'); }
     Object.keys(groups).sort(function (a, b) { return a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b); }).forEach(function (area) {
       g.appendChild(el('div', 'area', area));
@@ -176,7 +183,7 @@
     else if (d === 'lock') toast('Locks are view-only on the TV');
   }
   document.addEventListener('keydown', function (e) {
-    var k = e.keyCode;
+    var k = e.keyCode; if (keysSeen < 25) { keysSeen++; beacon('key', { code: k, sel: selKey }); }
     if (k === 37) { move('left'); e.preventDefault(); } else if (k === 39) { move('right'); e.preventDefault(); }
     else if (k === 38) { move('up'); e.preventDefault(); } else if (k === 40) { move('down'); e.preventDefault(); }
     else if (k === 13) { if (canDemo && !DEMO) { DEMO = true; canDemo = false; connect(); } else activate(); e.preventDefault(); }
@@ -198,5 +205,6 @@
   // tab switching with left/right when a tab is selected is handled by spatial nav; start
   // page switch helper for the demo screenshots: index.html?demo&page=climate
   var pm = location.search.match(/page=(\w+)/); if (pm) { page = pm[1]; selKey = 'tab|' + page; }
+  beacon('boot', { v: '1.0.1', ua: navigator.userAgent, href: location.href, viewport: innerWidth + 'x' + innerHeight });
   drawTabs(); showMsg('Connecting to Home Assistant…'); connect();
 })();
