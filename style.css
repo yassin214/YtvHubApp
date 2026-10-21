@@ -1,0 +1,27 @@
+:root { --void:#0b1320; --panel:#13203a; --panel2:#1a2b4d; --text:#e8f1ff; --muted:#8aa0c0; --primary:#00c2d1; --on:#ffd166; --warn:#ff6b6b; }
+* { box-sizing:border-box; }
+html, body { margin:0; width:1920px; height:1080px; overflow:hidden; background:var(--void); color:var(--text); font-family:"Samsung One", "Segoe UI", Arial, sans-serif; }
+header { display:flex; align-items:center; gap:48px; height:110px; padding:0 64px; }
+#brand { font-size:44px; letter-spacing:.04em; } #brand b { color:var(--primary); }
+#tabs { display:flex; gap:16px; flex:1; }
+.tab { font-size:30px; padding:12px 28px; border-radius:14px; background:var(--panel); color:var(--muted); }
+.tab.active { color:var(--text); border-bottom:5px solid var(--primary); }
+#clock { font-size:36px; color:var(--muted); }
+main { position:absolute; top:110px; bottom:64px; left:0; right:0; padding:0 64px; overflow-y:auto; overflow-x:hidden; scroll-behavior:smooth; }
+.area { font-size:28px; color:var(--primary); margin:28px 0 12px; letter-spacing:.06em; text-transform:uppercase; }
+.row { display:flex; flex-wrap:wrap; gap:22px; }
+.tile { width:292px; height:156px; border-radius:20px; background:var(--panel); padding:18px 22px; position:relative; border:4px solid transparent; transition:transform .08s; }
+.tile .name { font-size:28px; line-height:1.15; max-height:66px; overflow:hidden; }
+.tile .state { position:absolute; left:22px; bottom:16px; font-size:26px; color:var(--muted); }
+.tile .detail { position:absolute; right:22px; bottom:16px; font-size:24px; color:var(--muted); }
+.tile.on { background:var(--panel2); } .tile.on .state { color:var(--on); }
+.tile.off .state, .tile.unavailable .state { color:var(--muted); } .tile.unavailable { opacity:.45; }
+.mini { position:absolute; top:14px; right:14px; width:58px; height:58px; border-radius:50%; background:#0a1426; font-size:34px; line-height:58px; text-align:center; border:4px solid transparent; }
+.mini.m2 { right:84px; }
+.sel { border-color:var(--primary) !important; transform:scale(1.05); z-index:2; box-shadow:0 0 0 6px rgba(0,194,209,.25); }
+.tab.sel { transform:none; }
+footer { position:absolute; left:0; right:0; bottom:0; height:64px; padding:0 64px; display:flex; justify-content:space-between; align-items:center; font-size:22px; color:var(--muted); }
+#status.ok { color:#4cd7a0; } #status.bad { color:var(--warn); }
+#toast { position:absolute; left:50%; bottom:90px; transform:translateX(-50%); background:var(--primary); color:var(--void); padding:14px 34px; border-radius:30px; font-size:28px; opacity:0; transition:opacity .2s; }
+#toast.show { opacity:1; }
+.msg { font-size:34px; color:var(--muted); padding:80px 0; }
