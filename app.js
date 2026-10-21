@@ -190,6 +190,55 @@
     else if (k === 10009 || k === 27) { try { tizen.application.getCurrentApplication().exit(); } catch (x) {} }
   });
 
+  // ---------- voice: Bixby (hold the remote's MIC button) → Samsung VoiceInteraction callbacks ----------
+  // The remote's mic belongs to Bixby; apps get STRUCTURED commands, not audio: ontitleselection(title) when you say the name of an on-screen
+  // item, onselection(n) for "the first one" / "this one", onnavigation(...) for left/right/up/down/next/previous. Same actions as pressing OK.
+  function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9؀-ۿ ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
+  function pageOfDomain(d) { for (var i = 0; i < PAGES.length; i++) if (PAGES[i].domains.indexOf(d) >= 0) return PAGES[i].id; return null; }
+  function selectTileEl(eid) { var t = document.querySelector('.tile[data-eid="' + eid + '"]'); if (t) mark(t); return t; }
+  function voiceSelectTitle(title) {
+    var q = norm(title); if (!q) return false;
+    for (var i = 0; i < PAGES.length; i++) if (norm(PAGES[i].title) === q) { page = PAGES[i].id; selKey = 'tab|' + page; render(); toast('🎤 ' + PAGES[i].title); return true; }
+    var found = null;                                  // the best matching eligible entity on ANY page
+    Object.keys(states).forEach(function (eid) {
+      if (found || !eligible(eid) || !pageOfDomain(dom(eid))) return; var n = norm(nameOf(eid));
+      if (n === q || (n && (n.indexOf(q) >= 0 || q.indexOf(n) >= 0))) found = eid;
+    });
+    if (!found) { toast('🎤 "' + title + '" — nothing with that name'); return false; }
+    var pg = pageOfDomain(dom(found)); if (pg !== page) { page = pg; render(); }
+    var t = selectTileEl(found); if (!t) return false;
+    toast('🎤 ' + nameOf(found)); activate(); return true;
+  }
+  function visibleTiles() { return Array.prototype.slice.call(document.querySelectorAll('.tile')).filter(function (t) { var r = t.getBoundingClientRect(); return r.width && r.bottom > 0 && r.top < 1080; }); }
+  function setupVoice() {
+    var vi = window.webapis && webapis.voiceinteraction;
+    if (!vi) { beacon('voice', 'webapis.voiceinteraction not available'); return; }
+    try {
+      vi.setCallback({
+        onupdatestate: function () { return 'List'; },
+        onrequestcontentcontext: function () {
+          var items = [];
+          PAGES.forEach(function (p) { items.push(vi.buildVoiceInteractionContentContextItem(0, 0, p.title, [p.title.toLowerCase()], false)); });
+          visibleTiles().forEach(function (t) { var r = t.getBoundingClientRect(), n = nameOf(t.dataset.eid); items.push(vi.buildVoiceInteractionContentContextItem(Math.round(r.left), Math.round(r.top), n, [n.toLowerCase()], t.classList.contains('sel'))); });
+          beacon('voice.context', { items: items.length }); return vi.buildVoiceInteractionContentContextResponse(items);
+        },
+        ontitleselection: function (title) { beacon('voice.title', { title: title }); return voiceSelectTitle(title); },
+        onselection: function (n) {
+          beacon('voice.selection', { n: n }); var v = visibleTiles();
+          if (n === 0) { activate(); return true; } var t = n === -1 ? v[v.length - 1] : v[n - 1]; if (!t) return false; mark(t); activate(); return true;
+        },
+        onnavigation: function (nav) {
+          beacon('voice.nav', { nav: String(nav) });
+          var map = { NAV_LEFT: 'left', NAV_RIGHT: 'right', NAV_UP: 'up', NAV_DOWN: 'down', NAV_NEXT: 'right', NAV_PREVIOUS: 'left' };
+          if (map[nav]) { move(map[nav]); return true; } return false;
+        },
+        onplay: function () { beacon('voice.play', {}); return false; },
+        onpause: function () { beacon('voice.pause', {}); return false; }
+      });
+      vi.listen(); beacon('voice', 'listening');
+    } catch (e) { beacon('voice', { error: String(e) }); }
+  }
+
   // ---------- demo data (local layout test: index.html?demo) ----------
   function loadDemo() {
     var S = function (id, state, name, a) { states[id] = { entity_id: id, state: state, attributes: Object.assign({ friendly_name: name }, a || {}) }; };
@@ -205,6 +254,6 @@
   // tab switching with left/right when a tab is selected is handled by spatial nav; start
   // page switch helper for the demo screenshots: index.html?demo&page=climate
   var pm = location.search.match(/page=(\w+)/); if (pm) { page = pm[1]; selKey = 'tab|' + page; }
-  beacon('boot', { v: '1.0.1', ua: navigator.userAgent, href: location.href, viewport: innerWidth + 'x' + innerHeight });
-  drawTabs(); showMsg('Connecting to Home Assistant…'); connect();
+  beacon('boot', { v: '1.1.0', ua: navigator.userAgent, href: location.href, viewport: innerWidth + 'x' + innerHeight });
+  drawTabs(); showMsg('Connecting to Home Assistant…'); connect(); setupVoice();
 })();
