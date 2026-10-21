@@ -214,27 +214,34 @@
     var vi = window.webapis && webapis.voiceinteraction;
     if (!vi) { beacon('voice', 'webapis.voiceinteraction not available'); return; }
     try {
-      vi.setCallback({
-        onupdatestate: function () { return 'List'; },
+      var cb = {};   // log EVERY callback Bixby may call (unknown ones return false so the TV keeps its normal behaviour)
+      ['onchangeappstate', 'onplay', 'onpause', 'onfastforward', 'onrewind', 'onchangeprevioustrack', 'onchangenexttrack', 'onrestart', 'onskipbackward', 'onskipforward',
+        'onsetplayposition', 'onchangesubtitlemode', 'onchangeshufflemode', 'onchangescreenfitmode', 'onzoom', 'onrotate', 'onchange360mode', 'onchangerepeatmode',
+        'onadditiontolist', 'onremovalfromlist', 'onplaylist', 'onbrowselist', 'onskipad'].forEach(function (name) {
+        cb[name] = function () { var a = Array.prototype.slice.call(arguments).map(String); beacon('voice.' + name, a); toast('🎤 ' + name.replace(/^on/, '') + (a.length ? ' ' + a.join(',') : '')); return false; };
+      });
+      var handled = {
+        onupdatestate: function () { beacon('voice.onupdatestate', {}); return 'List'; },
         onrequestcontentcontext: function () {
           var items = [];
           PAGES.forEach(function (p) { items.push(vi.buildVoiceInteractionContentContextItem(0, 0, p.title, [p.title.toLowerCase()], false)); });
           visibleTiles().forEach(function (t) { var r = t.getBoundingClientRect(), n = nameOf(t.dataset.eid); items.push(vi.buildVoiceInteractionContentContextItem(Math.round(r.left), Math.round(r.top), n, [n.toLowerCase()], t.classList.contains('sel'))); });
           beacon('voice.context', { items: items.length }); return vi.buildVoiceInteractionContentContextResponse(items);
         },
-        ontitleselection: function (title) { beacon('voice.title', { title: title }); return voiceSelectTitle(title); },
+        ontitleselection: function (title) { beacon('voice.title', { title: title }); toast('🎤 title: ' + title); return voiceSelectTitle(title); },
         onselection: function (n) {
-          beacon('voice.selection', { n: n }); var v = visibleTiles();
+          beacon('voice.selection', { n: n }); toast('🎤 selection ' + n); var v = visibleTiles();
           if (n === 0) { activate(); return true; } var t = n === -1 ? v[v.length - 1] : v[n - 1]; if (!t) return false; mark(t); activate(); return true;
         },
         onnavigation: function (nav) {
-          beacon('voice.nav', { nav: String(nav) });
+          beacon('voice.nav', { nav: String(nav) }); toast('🎤 ' + String(nav));
           var map = { NAV_LEFT: 'left', NAV_RIGHT: 'right', NAV_UP: 'up', NAV_DOWN: 'down', NAV_NEXT: 'right', NAV_PREVIOUS: 'left' };
           if (map[nav]) { move(map[nav]); return true; } return false;
-        },
-        onplay: function () { beacon('voice.play', {}); return false; },
-        onpause: function () { beacon('voice.pause', {}); return false; }
-      });
+        }
+      };
+      Object.keys(handled).forEach(function (k) { cb[k] = handled[k]; });
+      cb.onrequestcontentcontext = (function (orig) { return function () { var r = orig(); toast('🎤 listening — say a page or tile name'); return r; }; })(cb.onrequestcontentcontext || function () { return '[]'; });
+      vi.setCallback(cb);
       vi.listen(); beacon('voice', 'listening');
     } catch (e) { beacon('voice', { error: String(e) }); }
   }
@@ -254,6 +261,6 @@
   // tab switching with left/right when a tab is selected is handled by spatial nav; start
   // page switch helper for the demo screenshots: index.html?demo&page=climate
   var pm = location.search.match(/page=(\w+)/); if (pm) { page = pm[1]; selKey = 'tab|' + page; }
-  beacon('boot', { v: '1.1.0', ua: navigator.userAgent, href: location.href, viewport: innerWidth + 'x' + innerHeight });
+  beacon('boot', { v: '1.1.2', ua: navigator.userAgent, href: location.href, viewport: innerWidth + 'x' + innerHeight });
   drawTabs(); showMsg('Connecting to Home Assistant…'); connect(); setupVoice();
 })();
