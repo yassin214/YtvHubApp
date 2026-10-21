@@ -94,11 +94,11 @@
   // ---------- model: what the page shows ----------
   function eligible(eid) { var s = states[eid]; return !!s && entArea[eid] !== '\u0000hidden'; }
   function buildModel() {
-    var secs = [], lights = Object.keys(states).filter(function (e) { return dom(e) === 'light' && eligible(e); }), byArea = {};
+    var secs = [], lights = Object.keys(states).filter(function (e) { return dom(e) === 'light' && eligible(e) && !/_segment_\d+$/.test(e); }), byArea = {};   // Govee "Segment 001…" sub-lights are not counted
     lights.forEach(function (e) { var a = (entArea[e] && entArea[e] !== '\u0000hidden') ? entArea[e] : 'Other'; (byArea[a] = byArea[a] || []).push(e); });
     var rooms = [];
     if (lights.length) rooms.push({ key: 'room|*', kind: 'room', name: 'All lights', eids: lights });
-    Object.keys(byArea).sort(function (a, b) { return a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b); }).forEach(function (a) { rooms.push({ key: 'room|' + a, kind: 'room', name: a, eids: byArea[a] }); });
+    Object.keys(byArea).sort(function (a, b) { return a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b); }).forEach(function (a) { rooms.push({ key: 'room|' + a, kind: 'room', name: a.replace(/\s*\([A-Za-z]{1,4}\)\s*$/, ''), eids: byArea[a] }); });   // "Living Room (LR)" → "Living Room"
     if (rooms.length) secs.push({ title: 'Rooms', tiles: rooms });
     if (states[SPOTIFY]) secs.push({ title: 'Music', tiles: [{ key: 'ent|' + SPOTIFY, kind: 'ent', eid: SPOTIFY, name: 'Spotify' }, { key: 'x|everywhere', kind: 'everywhere', name: 'Play on Everywhere' }] });
     var cool = Object.keys(states).filter(function (e) { return (dom(e) === 'climate' || dom(e) === 'fan') && eligible(e); })
@@ -278,6 +278,6 @@
     ['light.mbr_main', 'light.mbr_bed'].forEach(function (e) { entArea[e] = 'Master Room'; }); entArea['light.kitchen'] = 'Kitchen'; entArea['light.hall'] = 'Hall';
   }
 
-  beacon('boot', { v: '1.2.0', ua: navigator.userAgent, href: location.href, viewport: innerWidth + 'x' + innerHeight });
+  beacon('boot', { v: '1.2.1', ua: navigator.userAgent, href: location.href, viewport: innerWidth + 'x' + innerHeight });
   showMsg('Connecting to Home Assistant…'); connect(); setupVoice();
 })();
