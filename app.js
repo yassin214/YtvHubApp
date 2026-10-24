@@ -6,7 +6,7 @@
 // Only light / fan / climate / scene / script / media_player.spotify are ever CALLED — never switches or plugs; scenes/scripts that touch sockets are hidden.
 (function () {
   'use strict';
-  var VERSION = '2.0.0';
+  var VERSION = '2.1.0';
   var HUBQ = (location.search.match(/[?&]hub=([^&]+)/) || [])[1];            // dev/test override only (never set on the TV)
   var HUB = HUBQ ? decodeURIComponent(HUBQ) : 'http://192.168.3.96:8099';
   var DEMO = /[?&]demo\b/.test(location.search);
@@ -124,8 +124,19 @@
   }
   function musicTiles() {
     var t = [];
-    if (states[SPOTIFY]) t.push({ key: 'ent|' + SPOTIFY, kind: 'ent', eid: SPOTIFY, name: 'Spotify' }, { key: 'x|volume', kind: 'volume', name: 'Volume' }, { key: 'x|everywhere', kind: 'everywhere', name: 'Play on Everywhere' });
+    if (states[SPOTIFY]) t.push({ key: 'ent|' + SPOTIFY, kind: 'ent', eid: SPOTIFY, name: 'Spotify' }, { key: 'x|volume', kind: 'volume', name: 'Volume' });
     return t;
+  }
+  // every place Spotify can play right now (Echo group, single Echos, soundbar, TV...) as one tap each. Spotify plays on ONE target at a time.
+  function srcLabel(s) { return /^YTV$/i.test(s) ? 'YTV77' : s; }       // the 77" TV announces itself as "YTV" until it is renamed on the TV
+  function sourceTiles() {
+    var s = states[SPOTIFY], list = (s && s.attributes && s.attributes.source_list) || [];
+    var rank = function (x) { return /everywhere/i.test(x) ? 0 : 1; };
+    return list.slice().sort(function (a, b) { return rank(a) - rank(b) || a.localeCompare(b); }).map(function (x) { return { key: 'src|' + x, kind: 'src', src: x, name: srcLabel(x) }; });
+  }
+  function playOn(src) {
+    if (DEMO) { toast('Spotify → ' + srcLabel(src)); return; }
+    call('media_player', 'select_source', SPOTIFY, { source: src }, 'Spotify → ' + srcLabel(src)).then(function () { setTimeout(function () { request({ type: 'call_service', domain: 'media_player', service: 'media_play', target: { entity_id: [SPOTIFY] } }).catch(function () {}); }, 900); });
   }
   function sceneTiles() {
     return Object.keys(states).filter(function (e) { return (dom(e) === 'scene' || dom(e) === 'script') && eligible(e) && !HIDE_RX.test(e + ' ' + nameOf(e)); })
@@ -157,7 +168,7 @@
   function sectionsFor(p) {
     if (p === 'rooms') return [{ title: 'Rooms — OK toggles the lights, ＋ − dim them', tiles: roomTiles() }];
     if (p === 'cool') return [{ title: 'Cooling', tiles: coolTiles() }];
-    if (p === 'music') return [{ title: 'Music', tiles: musicTiles() }];
+    if (p === 'music') return [{ title: 'Music', tiles: musicTiles() }, { title: 'Play on - one tap switches where Spotify plays', tiles: sourceTiles() }];
     if (p === 'scenes') return [{ title: 'Scenes & routines', tiles: sceneTiles() }];
     if (p !== 'now') return [];
     var secs = [], sg = suggestions(), on = onNowTiles(), rt = routineTiles();
@@ -176,6 +187,9 @@
     if (tile.kind === 'room') {
       var on = tile.eids.filter(function (e) { return states[e] && states[e].state === 'on'; }).length;
       cls = on ? 'on' : 'off'; st = on ? (tile.eids.length > 1 ? on + ' of ' + tile.eids.length + ' on' : 'on') : 'off';
+    } else if (tile.kind === 'src') {
+      s = states[SPOTIFY]; a = (s && s.attributes) || {}; var here = a.source === tile.src; cls = here ? 'on music' : 'off music';
+      st = here ? (s.state === 'playing' ? 'playing here' : 'selected') : 'tap to play here'; if (/everywhere/i.test(tile.src)) sub = 'all Echo speakers together';
     } else if (tile.kind === 'everywhere') { cls = 'off music'; st = 'Echo speakers';
     } else if (tile.kind === 'volume') {
       s = states[SPOTIFY]; a = (s && s.attributes) || {}; cls = 'off music'; st = a.volume_level != null ? Math.round(a.volume_level * 100) + '%' : '–'; sub = a.is_volume_muted ? 'muted' : '';
@@ -346,6 +360,7 @@
     }
     var tl = model[cur.dataset.key]; if (!tl) return;
     if (tl.kind === 'room') { var anyOn = tl.eids.some(function (e) { return states[e] && states[e].state === 'on'; }); call('light', anyOn ? 'turn_off' : 'turn_on', tl.eids, null, tl.name); return; }
+    if (tl.kind === 'src') { playOn(tl.src); return; }
     if (tl.kind === 'everywhere') { everywhere(); return; }
     if (tl.kind === 'volume') { var s2 = states[SPOTIFY]; call('media_player', 'volume_mute', SPOTIFY, { is_volume_muted: !(s2 && s2.attributes && s2.attributes.is_volume_muted) }, 'Mute'); return; }
     var e2 = tl.eid, d = dom(e2), st = states[e2];
@@ -433,7 +448,7 @@
     S('fan.lr_fan', 'on', 'Tower fan', { percentage: 66 }); S('scene.home', 'scening', 'Home'); S('scene.away', 'scening', 'Away'); S('script.presence_snooze_master', 'off', 'Pause bedroom lights 10 min'); S('script.room_devices', 'off', 'Room devices');
     S('person.demo', 'home', 'Demo user'); S('binary_sensor.demo_asleep', 'off', 'Asleep'); S('automation.a1', 'on', 'AC idle limit'); S('automation.a2', 'off', 'AC2 on at arrival'); S('automation.a3', 'off', 'Vacuum when away'); S('automation.a4', 'on', 'Sunset lights');
     S('media_player.vacuum_x', 'unavailable', 'Vacuum'); S('media_player.dual', 'unavailable', 'Dual 200S');
-    S(SPOTIFY, 'playing', 'Spotify', { media_title: 'Hotel California', media_artist: 'Eagles', volume_level: 0.35, source_list: ['Everywhere', 'Living Room speaker'] });
+    S(SPOTIFY, 'playing', 'Spotify', { media_title: 'Hotel California', media_artist: 'Eagles', volume_level: 0.35, source_list: ['Echo Dot', 'Everywhere', 'Hall Echo Show 5', 'Max', 'Pop', 'Q-Series Soundbar', 'S11', 'YTV'], source: 'Everywhere' });
     ['light.lr_ceiling', 'light.lr_nano', 'light.lr_lamp', 'light.tv_lights'].forEach(function (e) { entArea[e] = 'Living Room'; });
     ['light.mbr_main', 'light.mbr_bed'].forEach(function (e) { entArea[e] = 'Master Room'; }); entArea['light.kitchen'] = 'Kitchen'; entArea['light.hall'] = 'Hall'; entArea['light.guest'] = 'Guest Bedroom';
   }
