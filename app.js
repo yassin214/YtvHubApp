@@ -1,24 +1,44 @@
-// Y214 Hub v2.0 — remote-driven Home Assistant dashboard for the Samsung TV (Tizen web app).
-// Pages: Now (suggestions from your habits, what is on, quick routines) · Rooms · Cooling · Music · Scenes · Insights (your habits, drawn) · Health (what needs attention).
+// Y214 Hub v2.2 — remote-driven Home Assistant dashboard for the Samsung TV (Tizen web app).
+// Pages: Now (suggestions from your habits, what is on, quick routines) · Rooms · Devices (every light on its own, by brand, + the robot) · Cooling · Music · Scenes · Insights (your habits, drawn) · Health (what needs attention).
+// v2.2.0 (04.11.26, operator board): Devices page (on/off, brightness, tone/effect per light, grouped by brand), Roborock tile, Living Room theme (felt blues + white diamond panels), EN / Arabic toggle (RTL).
 // HA is reached over its WebSocket API. The access token is NOT in this app: it is fetched at start from the laptop service
 // (http://192.168.3.96:8099/ha-token, answers only the TV) and belongs to a limited, non-admin HA user.
 // Your habits (private) are fetched from the same laptop service (/habits.json, LAN only) — they are never part of this public app.
-// Only light / fan / climate / scene / script / media_player.spotify are ever CALLED — never switches or plugs; scenes/scripts that touch sockets are hidden.
+// Only light / fan / climate / vacuum / scene / script / media_player.spotify are ever CALLED — never switches or plugs; scenes/scripts that touch sockets are hidden.
 (function () {
   'use strict';
-  var VERSION = '2.1.0';
+  var VERSION = '2.2.0';
   var HUBQ = (location.search.match(/[?&]hub=([^&]+)/) || [])[1];            // dev/test override only (never set on the TV)
   var HUB = HUBQ ? decodeURIComponent(HUBQ) : 'http://192.168.3.96:8099';
   var DEMO = /[?&]demo\b/.test(location.search);
   var SPOTIFY = 'media_player.spotify';
-  var PAGES = [{ id: 'now', name: 'Now', key: 403 }, { id: 'rooms', name: 'Rooms', key: 404 }, { id: 'cool', name: 'Cooling', key: 405 }, { id: 'music', name: 'Music', key: 406 },
+  var PAGES = [{ id: 'now', name: 'Now', key: 403 }, { id: 'rooms', name: 'Rooms', key: 404 }, { id: 'devices', name: 'Devices' }, { id: 'cool', name: 'Cooling', key: 405 }, { id: 'music', name: 'Music', key: 406 },
     { id: 'scenes', name: 'Scenes' }, { id: 'insights', name: 'Insights' }, { id: 'health', name: 'Health' }];
+  // ---------- language: English / Arabic (toggle tab in the header; remembered on the TV) ----------
+  var LANG = (function () { try { return localStorage.getItem('y214hub.lang') || 'en'; } catch (e) { return 'en'; } })();
+  var AR = {
+    'Now': 'الآن', 'Rooms': 'الغرف', 'Devices': 'الأجهزة', 'Cooling': 'التبريد', 'Music': 'الموسيقى', 'Scenes': 'المشاهد', 'Insights': 'العادات', 'Health': 'الحالة',
+    'on': 'يعمل', 'off': 'مطفأ', 'unavailable': 'غير متصل', 'scene': 'مشهد', 'script': 'إجراء', 'playing': 'يشغّل', 'paused': 'متوقف مؤقتاً', 'idle': 'خامل', 'not active': 'غير نشط',
+    'docked': 'في القاعدة', 'cleaning': 'ينظّف', 'returning': 'يعود للقاعدة', 'charging': 'يشحن', 'error': 'خطأ', 'cool': 'تبريد', 'heat': 'تدفئة', 'auto': 'تلقائي', 'dry': 'تجفيف', 'fan_only': 'مروحة',
+    'All lights': 'كل الأضواء', 'Other': 'أخرى', 'Living Room': 'غرفة المعيشة', 'Master Bedroom': 'غرفة النوم الرئيسية', 'Guest Bedroom': 'غرفة الضيوف', 'Kitchen': 'المطبخ', 'Hall': 'الصالة',
+    'Corridor': 'الممر', 'Laundry Room': 'غرفة الغسيل', 'Master Bathroom': 'الحمام الرئيسي', 'Guest Bathroom': 'حمام الضيوف', 'Master Room': 'غرفة النوم الرئيسية',
+    'Rooms — OK toggles the lights, ＋ − dim them': 'الغرف — موافق يشغّل/يطفئ الأضواء، ☀ ☾ للسطوع',
+    'Robot — OK start / pause, ⌂ back to dock': 'الروبوت — موافق تشغيل / إيقاف، ⌂ العودة للقاعدة',
+    'Play on - one tap switches where Spotify plays': 'التشغيل على — ضغطة واحدة لتغيير مكان سبوتيفاي',
+    'Scenes & routines': 'المشاهد والإجراءات', 'On right now': 'يعمل الآن', 'Quick routines': 'إجراءات سريعة', 'lights': 'أضواء', 'tap to play here': 'اضغط للتشغيل هنا',
+    'playing here': 'يشغّل هنا', 'selected': 'محدد', 'all Echo speakers together': 'كل سماعات إيكو معاً', 'Nothing to show here.': 'لا يوجد ما يُعرض هنا.', 'battery': 'البطارية'
+  };
+  var AR_DAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+  function T(s) { return LANG === 'ar' && AR[s] ? AR[s] : s; }
+  function applyLang() { var h = document.documentElement; h.setAttribute('lang', LANG); h.setAttribute('dir', LANG === 'ar' ? 'rtl' : 'ltr'); }
+  function toggleLang() { LANG = LANG === 'ar' ? 'en' : 'ar'; try { localStorage.setItem('y214hub.lang', LANG); } catch (e) {} applyLang(); tick(); selKey = 'lang'; render(); beacon('lang', LANG); }
   var HIDE_RX = /socket|plug|outlet|room_devices|volume_recovery|exposure_build|ac_off_warning|ac_off_fan_on|vacuum_away/i;   // internal helpers + anything that could touch plugs
   var keysSeen = 0;
   function beacon(section, data) { try { fetch(HUB + '/probe', { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ section: 'hub.' + section, data: data }) }).catch(function () {}); } catch (e) {} }
   window.addEventListener('error', function (e) { beacon('error', { msg: e.message, at: (e.filename || '') + ':' + e.lineno }); });
   window.addEventListener('unhandledrejection', function (e) { beacon('rejection', String(e.reason)); });
 
+  var entDev = {}, entPlat = {}, entLab = {}, devInfo = {};
   var states = {}, entArea = {}, ws = null, nextId = 1, pending = {}, selKey = '', canDemo = false, model = {}, refillTimer = null, habits = null, habitsErr = '';
   var page = (location.search.match(/[?&]page=(\w+)/) || [])[1] || 'now';
   var $ = function (id) { return document.getElementById(id); };
@@ -35,7 +55,7 @@
 
   // ---------- clock ----------
   var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  function tick() { var d = new Date(); $('clock').textContent = pad2(d.getHours()) + ':' + pad2(d.getMinutes()); $('date').textContent = DAYS[d.getDay()] + ' ' + d.getDate(); }
+  function tick() { var d = new Date(); $('clock').textContent = pad2(d.getHours()) + ':' + pad2(d.getMinutes()); $('date').textContent = (LANG === 'ar' ? AR_DAYS : DAYS)[d.getDay()] + ' ' + d.getDate(); }
   setInterval(tick, 15000); tick();
 
   // ---------- HA websocket ----------
@@ -90,9 +110,10 @@
   function loadAreas() {
     var areas = {}, devArea = {};
     return request({ type: 'config/area_registry/list' }).then(function (a) { a.forEach(function (x) { areas[x.area_id] = x.name; }); }).catch(function () {})
-      .then(function () { return request({ type: 'config/device_registry/list' }).then(function (d) { d.forEach(function (x) { if (x.area_id) devArea[x.id] = x.area_id; }); }).catch(function () {}); })
+      .then(function () { return request({ type: 'config/device_registry/list' }).then(function (d) { d.forEach(function (x) { if (x.area_id) devArea[x.id] = x.area_id; devInfo[x.id] = { mf: x.manufacturer || '', model: x.model || '' }; }); }).catch(function () {}); })
       .then(function () { return request({ type: 'config/entity_registry/list_for_display' }).then(function (r) {
         (r.entities || []).forEach(function (e) {
+          if (e.di) entDev[e.ei] = e.di; if (e.pl) entPlat[e.ei] = e.pl; if (e.lb) entLab[e.ei] = e.lb;
           if (e.hb || e.ec) { entArea[e.ei] = '\u0000hidden'; return; }
           var aid = e.ai || (e.di && devArea[e.di]); if (aid && areas[aid]) entArea[e.ei] = areas[aid];
         });
@@ -102,7 +123,7 @@
     var had = !!states[d.entity_id];
     if (d.new_state) states[d.entity_id] = d.new_state; else delete states[d.entity_id];
     var dm = dom(d.entity_id);
-    if (!(dm === 'light' || dm === 'climate' || dm === 'fan' || dm === 'scene' || dm === 'script' || dm === 'person' || dm === 'automation' || d.entity_id === SPOTIFY || d.new_state && d.new_state.state === 'unavailable')) return;
+    if (!(dm === 'light' || dm === 'climate' || dm === 'fan' || dm === 'vacuum' || dm === 'scene' || dm === 'script' || dm === 'person' || dm === 'automation' || d.entity_id === SPOTIFY || d.new_state && d.new_state.state === 'unavailable')) return;
     if (had !== !!d.new_state) { renderKeepSel(); return; }
     clearTimeout(refillTimer); refillTimer = setTimeout(function () { if (page === 'now' || page === 'health') renderKeepSel(); else if (page !== 'insights') refillAll(); }, 250);
   }
@@ -113,10 +134,33 @@
   function roomTiles() {
     var lights = Object.keys(states).filter(function (e) { return dom(e) === 'light' && eligible(e) && !/_segment_\d+$/.test(e); }), byArea = {}, rooms = [];
     lights.forEach(function (e) { var a = (entArea[e] && entArea[e] !== '\u0000hidden') ? entArea[e] : 'Other'; (byArea[a] = byArea[a] || []).push(e); });
-    if (lights.length) rooms.push({ key: 'room|*', kind: 'room', name: 'All lights', eids: lights });
-    Object.keys(byArea).sort(function (a, b) { return a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b); }).forEach(function (a) { rooms.push({ key: 'room|' + a, kind: 'room', name: roomName(a), eids: byArea[a] }); });
+    if (lights.length) rooms.push({ key: 'room|*', kind: 'room', name: T('All lights'), eids: lights });
+    Object.keys(byArea).sort(function (a, b) { return a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b); }).forEach(function (a) { rooms.push({ key: 'room|' + a, kind: 'room', name: T(roomName(a)), en: roomName(a), eids: byArea[a] }); });
     return rooms;
   }
+  // Devices page: every light on its own, grouped by brand. The same lamp reached twice (Govee over BLE AND over govee2mqtt) is shown once.
+  // DUP_HIDE = BLE twins INFERRED from names (04.11.26): Ceiling Light = LRC, Ceiling Light 1 / ceiling light 2 = K1 / K2, TV lights (BLE) = TV Lights.
+  var DUP_HIDE = { 'light.govee_h60a6': 1, 'light.govee_h60a1': 1, 'light.govee_h60a1_2': 1, 'light.govee_h6099': 1 };
+  function brandOf(e) {
+    var d = devInfo[entDev[e]] || {}, m = (d.mf || '') + ' ' + (entPlat[e] || '');
+    if (/govee/i.test(m)) return 'Govee'; if (/lepro/i.test(m)) return 'Lepro'; if (/nanoleaf/i.test(m)) return 'Nanoleaf'; if (/sonoff|ewelink/i.test(m)) return 'SONOFF';
+    if (/roborock/i.test(m)) return 'Roborock'; if (/_tz|tuya/i.test(m)) return 'Tuya'; if (/switch_as_x/i.test(m)) return 'Smart switch'; if (/zha/i.test(m)) return 'Zigbee';
+    return d.mf || 'Other';
+  }
+  function roomOf(e) { return (entArea[e] && entArea[e] !== '\u0000hidden') ? roomName(entArea[e]) : 'Other'; }
+  function deviceSections() {
+    var lights = Object.keys(states).filter(function (e) { return dom(e) === 'light' && eligible(e) && !/_segment_\d+$/.test(e) && !DUP_HIDE[e] && (entLab[e] || []).indexOf('not_in_room_rules') < 0; });
+    var by = {}, secs = [];
+    lights.forEach(function (e) { var b = brandOf(e); (by[b] = by[b] || []).push(e); });
+    var vac = Object.keys(states).filter(function (e) { return dom(e) === 'vacuum' && eligible(e); });
+    if (vac.length) secs.push({ title: T('Robot — OK start / pause, ⌂ back to dock'), tiles: vac.map(function (e) { return { key: 'dev|' + e, kind: 'vac', eid: e, name: nameOf(e) }; }) });
+    Object.keys(by).sort(function (a, b) { return by[b].length - by[a].length || a.localeCompare(b); }).forEach(function (b) {
+      secs.push({ title: b + ' — ' + by[b].length + ' ' + T('lights'), tiles: by[b].sort(function (x, y) { return roomOf(x).localeCompare(roomOf(y)) || nameOf(x).localeCompare(nameOf(y)); })
+        .map(function (e) { return { key: 'dev|' + e, kind: 'light', eid: e, name: nameOf(e) }; }) });
+    });
+    return secs;
+  }
+  function vacBattery(eid) { var s = states['sensor.' + eid.split('.')[1] + '_battery']; return s && s.state !== 'unavailable' ? s.state : null; }
   function coolTiles() {
     return Object.keys(states).filter(function (e) { return (dom(e) === 'climate' || dom(e) === 'fan') && eligible(e); })
       .sort(function (a, b) { return (dom(a) === dom(b) ? 0 : dom(a) === 'climate' ? -1 : 1) || nameOf(a).localeCompare(nameOf(b)); })
@@ -145,7 +189,7 @@
   }
   function suggestions() {
     var part = daypart(), out = [], rooms = roomTiles(), byName = {}, seen = {};
-    rooms.forEach(function (r) { byName[r.name] = r; });
+    rooms.forEach(function (r) { byName[r.en || r.name] = r; });
     var src = habits && habits.suggest && habits.suggest[part];
     if (src) src.forEach(function (s) {
       if (out.length >= 6) return;
@@ -166,15 +210,16 @@
       .map(function (t) { return { key: 'rt|' + t.key, kind: 'ent', eid: t.eid, name: t.name }; });
   }
   function sectionsFor(p) {
-    if (p === 'rooms') return [{ title: 'Rooms — OK toggles the lights, ＋ − dim them', tiles: roomTiles() }];
-    if (p === 'cool') return [{ title: 'Cooling', tiles: coolTiles() }];
-    if (p === 'music') return [{ title: 'Music', tiles: musicTiles() }, { title: 'Play on - one tap switches where Spotify plays', tiles: sourceTiles() }];
-    if (p === 'scenes') return [{ title: 'Scenes & routines', tiles: sceneTiles() }];
+    if (p === 'rooms') return [{ title: T('Rooms — OK toggles the lights, ＋ − dim them'), tiles: roomTiles() }];
+    if (p === 'devices') return deviceSections();
+    if (p === 'cool') return [{ title: T('Cooling'), tiles: coolTiles() }];
+    if (p === 'music') return [{ title: T('Music'), tiles: musicTiles() }, { title: T('Play on - one tap switches where Spotify plays'), tiles: sourceTiles() }];
+    if (p === 'scenes') return [{ title: T('Scenes & routines'), tiles: sceneTiles() }];
     if (p !== 'now') return [];
     var secs = [], sg = suggestions(), on = onNowTiles(), rt = routineTiles();
     if (sg.length) secs.push({ title: 'Suggested for this ' + daypart() + ' — learned from what you do', tiles: sg });
-    if (on.length) secs.push({ title: 'On right now', tiles: on });
-    if (rt.length) secs.push({ title: 'Quick routines', tiles: rt });
+    if (on.length) secs.push({ title: T('On right now'), tiles: on });
+    if (rt.length) secs.push({ title: T('Quick routines'), tiles: rt });
     return secs;
   }
 
@@ -190,6 +235,15 @@
     } else if (tile.kind === 'src') {
       s = states[SPOTIFY]; a = (s && s.attributes) || {}; var here = a.source === tile.src; cls = here ? 'on music' : 'off music';
       st = here ? (s.state === 'playing' ? 'playing here' : 'selected') : 'tap to play here'; if (/everywhere/i.test(tile.src)) sub = 'all Echo speakers together';
+    } else if (tile.kind === 'light') {
+      s = states[tile.eid]; if (!s) return; a = s.attributes || {};
+      cls = s.state === 'unavailable' ? 'unavailable' : (s.state === 'on' ? 'on' : 'off');
+      st = s.state === 'on' && a.brightness != null ? T('on') + ' · ' + Math.round(a.brightness / 2.55) + '%' : T(s.state);
+      sub = T(roomOf(tile.eid)) + (s.state === 'on' && a.effect && a.effect !== 'None' ? ' · ' + a.effect : (s.state === 'on' && a.color_temp_kelvin ? ' · ' + a.color_temp_kelvin + 'K' : ''));
+    } else if (tile.kind === 'vac') {
+      s = states[tile.eid]; if (!s) return; a = s.attributes || {}; var b = vacBattery(tile.eid);
+      cls = s.state === 'unavailable' ? 'unavailable' : (s.state === 'cleaning' || s.state === 'returning' ? 'on' : 'off');
+      st = T(s.state); sub = (b != null ? '🔋 ' + b + '%' : '') + (a.fan_speed ? '  ·  ' + a.fan_speed : '');
     } else if (tile.kind === 'everywhere') { cls = 'off music'; st = 'Echo speakers';
     } else if (tile.kind === 'volume') {
       s = states[SPOTIFY]; a = (s && s.attributes) || {}; cls = 'off music'; st = a.volume_level != null ? Math.round(a.volume_level * 100) + '%' : '–'; sub = a.is_volume_muted ? 'muted' : '';
@@ -202,14 +256,20 @@
       else if (d === 'scene' || d === 'script') { st = d === 'scene' ? 'scene' : 'script'; cls = 'off'; }
       else if (tile.eid === SPOTIFY) { cls += ' music'; sub = a.media_title ? String(a.media_title) + (a.media_artist ? ' · ' + a.media_artist : '') : sub; if (st === 'paused' || st === 'idle' || st === 'off') st = st === 'off' ? 'not active' : st; }
     }
+    if (tile.kind === 'room') st = on ? (tile.eids.length > 1 ? (LANG === 'ar' ? on + ' من ' + tile.eids.length + ' يعمل' : st) : T('on')) : T('off');
+    else if (tile.kind === 'ent' || tile.kind === 'src') st = T(st);
+    if (sub && AR[sub]) sub = T(sub);
     t.className = 'tile nav ' + cls + (tile.sg ? ' sg' : '') + (selKey === tile.key ? ' sel' : '');
     if (tile.kind === 'ent' && dom(tile.eid) === 'climate') t.className += ' lowmini';
-    if (tile.kind === 'room') t.className += ' lowmini';
+    if (tile.kind === 'room' || tile.kind === 'vac') t.className += ' lowmini';
+    if (tile.kind === 'light') t.className += ' lowmini mini3';
     var nm = el('div', 'name', tile.name); if (tile.eid === SPOTIFY) nm.style.maxWidth = '215px'; t.appendChild(nm);
     if (sub) t.appendChild(el('div', 'sub', sub));
     t.appendChild(el('div', 'state', st));
     if (tile.kind === 'ent' && dom(tile.eid) === 'climate') { addMini(t, tile.key, '+', 'up', 'm1'); addMini(t, tile.key, '−', 'down', 'm2'); }
     if (tile.kind === 'room') { addMini(t, tile.key, '☀', 'bup', 'm1'); addMini(t, tile.key, '☾', 'bdn', 'm2'); }
+    if (tile.kind === 'light') { addMini(t, tile.key, '☀', 'bup', 'm1'); addMini(t, tile.key, '☾', 'bdn', 'm2'); addMini(t, tile.key, '◐', 'tone', 'm3'); }
+    if (tile.kind === 'vac') { addMini(t, tile.key, '⌂', 'dock', 'm1'); }
     if (tile.kind === 'volume') { addMini(t, tile.key, '+', 'vup', 'm1'); addMini(t, tile.key, '−', 'vdn', 'm2'); }
     if (tile.eid === SPOTIFY) { addMini(t, tile.key, '⏭', 'next', 'm1'); addMini(t, tile.key, '⏮', 'prev', 'm2'); }
     if (selKey && t.dataset.key === selKey) t.classList.add('sel');
@@ -237,7 +297,8 @@
   }
   function renderTabs() {
     var t = $('tabs'); t.textContent = '';
-    PAGES.forEach(function (p) { var b = el('div', 'tab nav' + (p.id === page ? ' active' : ''), p.name); b.dataset.kind = 'tab'; b.dataset.page = p.id; b.dataset.key = 'tab|' + p.id; t.appendChild(b); });
+    PAGES.forEach(function (p) { var b = el('div', 'tab nav' + (p.id === page ? ' active' : ''), T(p.name)); b.dataset.kind = 'tab'; b.dataset.page = p.id; b.dataset.key = 'tab|' + p.id; t.appendChild(b); });
+    var lg = el('div', 'tab nav lang', LANG === 'ar' ? 'EN' : 'عربي'); lg.dataset.kind = 'lang'; lg.dataset.key = 'lang'; t.appendChild(lg);
   }
   // ---- insights / health: drawn, read-only
   function barsSvg(vals, color, marks, w, h) {
@@ -297,7 +358,7 @@
       sec.tiles.forEach(function (tile) { model[tile.key] = tile; var t = el('div', 'tile nav'); t.dataset.kind = 'tile'; t.dataset.key = tile.key; fillTile(t, tile); row.appendChild(t); count++; });
     });
     beacon('render', { page: page, tiles: count });
-    if (!count && page !== 'now') showMsg('Nothing to show here.');
+    if (!count && page !== 'now') showMsg(T('Nothing to show here.'));
     mark();
   }
   function renderKeepSel() { var keep = selKey; render(); if (keep) { selKey = keep; mark(); } }
@@ -341,8 +402,25 @@
   function activate() {
     var cur = curEl(); if (!cur) return;
     if (cur.dataset.kind === 'tab') { setPage(cur.dataset.page); return; }
+    if (cur.dataset.kind === 'lang') { toggleLang(); return; }
     if (cur.dataset.kind === 'mini') {
       var tile = model[cur.dataset.key], act = cur.dataset.act; if (!tile) return;
+      if (tile.kind === 'light') {
+        var ls = states[tile.eid], la = (ls && ls.attributes) || {}, isOn = ls && ls.state === 'on';
+        if (act === 'bup') { if (isOn) call('light', 'turn_on', tile.eid, { brightness_step_pct: 20 }, tile.name + ' ☀'); else call('light', 'turn_on', tile.eid, { brightness_pct: 40 }, tile.name + ' 40%'); }
+        else if (act === 'bdn') { if (isOn) call('light', 'turn_on', tile.eid, { brightness_step_pct: -20 }, tile.name + ' ☾'); }
+        else if (act === 'tone') {
+          var fx = (la.effect_list || []).filter(function (x) { return x && x !== 'None'; });
+          if (fx.length) { var nx = fx[(fx.indexOf(la.effect) + 1) % fx.length]; call('light', 'turn_on', tile.eid, { effect: nx }, tile.name + ' · ' + nx); }
+          else if ((la.supported_color_modes || []).indexOf('color_temp') >= 0) {
+            var ks = [2700, 4000, 5500, 6500], ck = la.color_temp_kelvin || 0, nk = ks[0];
+            for (var i = 0; i < ks.length; i++) { if (ks[i] > ck + 50) { nk = ks[i]; break; } }
+            call('light', 'turn_on', tile.eid, { color_temp_kelvin: nk }, tile.name + ' · ' + nk + 'K');
+          } else toast(tile.name + ': no tone / effect control');
+        }
+        return;
+      }
+      if (tile.kind === 'vac') { if (act === 'dock') call('vacuum', 'return_to_base', tile.eid, null, tile.name + ' ⌂'); return; }
       if (tile.kind === 'room') {
         var onE = tile.eids.filter(function (e) { return states[e] && states[e].state === 'on'; });
         if (act === 'bup') { if (onE.length) call('light', 'turn_on', onE, { brightness_step_pct: 20 }, tile.name + ' brighter'); else call('light', 'turn_on', tile.eids, { brightness_pct: 40 }, tile.name + ' 40%'); }
@@ -360,6 +438,8 @@
     }
     var tl = model[cur.dataset.key]; if (!tl) return;
     if (tl.kind === 'room') { var anyOn = tl.eids.some(function (e) { return states[e] && states[e].state === 'on'; }); call('light', anyOn ? 'turn_off' : 'turn_on', tl.eids, null, tl.name); return; }
+    if (tl.kind === 'light') { var lst = states[tl.eid]; call('light', lst && lst.state === 'on' ? 'turn_off' : 'turn_on', tl.eid, null, tl.name); return; }
+    if (tl.kind === 'vac') { var vs = states[tl.eid]; call('vacuum', vs && vs.state === 'cleaning' ? 'pause' : 'start', tl.eid, null, tl.name); return; }
     if (tl.kind === 'src') { playOn(tl.src); return; }
     if (tl.kind === 'everywhere') { everywhere(); return; }
     if (tl.kind === 'volume') { var s2 = states[SPOTIFY]; call('media_player', 'volume_mute', SPOTIFY, { is_volume_muted: !(s2 && s2.attributes && s2.attributes.is_volume_muted) }, 'Mute'); return; }
@@ -451,8 +531,14 @@
     S(SPOTIFY, 'playing', 'Spotify', { media_title: 'Hotel California', media_artist: 'Eagles', volume_level: 0.35, source_list: ['Echo Dot', 'Everywhere', 'Hall Echo Show 5', 'Max', 'Pop', 'Q-Series Soundbar', 'S11', 'YTV'], source: 'Everywhere' });
     ['light.lr_ceiling', 'light.lr_nano', 'light.lr_lamp', 'light.tv_lights'].forEach(function (e) { entArea[e] = 'Living Room'; });
     ['light.mbr_main', 'light.mbr_bed'].forEach(function (e) { entArea[e] = 'Master Room'; }); entArea['light.kitchen'] = 'Kitchen'; entArea['light.hall'] = 'Hall'; entArea['light.guest'] = 'Guest Bedroom';
+    S('vacuum.qrevo_s_pro_series', 'docked', 'Qrevo S Pro Series', { fan_speed: 'quiet' }); S('sensor.qrevo_s_pro_series_battery', '100', 'Battery');
+    states['light.mbr_bed'].attributes.effect_list = ['Sunrise', 'Reading', 'Night']; states['light.lr_ceiling'].attributes.color_temp_kelvin = 4000;
+    entPlat['light.lr_ceiling'] = 'mqtt'; entPlat['light.mbr_main'] = 'mqtt'; entPlat['light.mbr_bed'] = 'mqtt'; entPlat['light.kitchen'] = 'mqtt'; entPlat['light.guest'] = 'mqtt'; entPlat['light.tv_lights'] = 'mqtt';
+    devInfo.g = { mf: 'Govee' }; ['light.lr_ceiling', 'light.mbr_main', 'light.mbr_bed', 'light.kitchen', 'light.guest', 'light.tv_lights'].forEach(function (e) { entDev[e] = 'g'; });
+    entPlat['light.lr_nano'] = 'nanoleaf'; entPlat['light.lr_lamp'] = 'lepro_led'; entPlat['light.hall'] = 'lepro_led';
   }
 
   beacon('boot', { v: VERSION, ua: navigator.userAgent, href: location.href, viewport: innerWidth + 'x' + innerHeight });
-  showMsg('Connecting to Home Assistant…'); connect(); setupVoice();
+  if (/[?&]lang=ar\b/.test(location.search)) LANG = 'ar';
+  applyLang(); tick(); showMsg('Connecting to Home Assistant…'); connect(); setupVoice();
 })();
