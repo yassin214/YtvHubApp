@@ -11,7 +11,7 @@
     document.body.style.zoom = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
   }
   fitScreen(); window.addEventListener('resize', fitScreen);
-  var VERSION = '2.5.0';
+  var VERSION = '2.5.1';
   var HUBQ = (location.search.match(/[?&]hub=([^&]+)/) || [])[1];            // dev/test override only (never set on the TV)
   var HUB = HUBQ ? decodeURIComponent(HUBQ) : 'http://192.168.3.96:8099';
   var DEMO = /[?&]demo\b/.test(location.search);
