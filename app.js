@@ -11,16 +11,16 @@
     document.body.style.zoom = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
   }
   fitScreen(); window.addEventListener('resize', fitScreen);
-  var VERSION = '2.3.0';
+  var VERSION = '2.4.0';
   var HUBQ = (location.search.match(/[?&]hub=([^&]+)/) || [])[1];            // dev/test override only (never set on the TV)
   var HUB = HUBQ ? decodeURIComponent(HUBQ) : 'http://192.168.3.96:8099';
   var DEMO = /[?&]demo\b/.test(location.search);
   var SPOTIFY = 'media_player.spotify';
   var PAGES = [{ id: 'now', name: 'Now', key: 403 }, { id: 'rooms', name: 'Rooms', key: 404 }, { id: 'devices', name: 'Devices' }, { id: 'cool', name: 'Cooling', key: 405 }, { id: 'music', name: 'Music', key: 406 },
-    { id: 'scenes', name: 'Scenes' }, { id: 'cameras', name: 'Cameras' }, { id: 'energy', name: 'Energy' }, { id: 'insights', name: 'Insights' }, { id: 'health', name: 'Health' }];
+    { id: 'scenes', name: 'Scenes' }, { id: 'cameras', name: 'Cameras' }, { id: 'energy', name: 'Energy' }, { id: 'insights', name: 'Insights' }, { id: 'security', name: 'Security' }, { id: 'health', name: 'Health' }];
   // ---------- language: English / Arabic (toggle tab in the header; remembered on the TV) ----------
   var LANG = (function () { try { return localStorage.getItem('y214hub.lang') || 'en'; } catch (e) { return 'en'; } })();
-  var AR = {
+  var AR = { 'Live feed unavailable':'البث المباشر غير متاح', 'OK for live view':'اضغط للبث المباشر', 'Connecting live feed':'جار الاتصال بالبث المباشر', 'Lighting':'الإضاءة','Climate':'التكييف','Security':'الأمان','Media':'الوسائط','Home':'الرئيسية','No reading':'لا توجد قراءة','Demo camera':'كاميرا تجريبية',
     Cameras: 'الكاميرات', Energy: 'الطاقة', Power: 'القدرة', 'Energy meters': 'عدادات الطاقة',
     'OK for snapshot': 'اضغط لعرض الصورة', 'Snapshot unavailable': 'الصورة غير متاحة',
     'Demo camera': 'كاميرا تجريبية', 'Loading snapshot': 'جار تحميل الصورة',
@@ -66,6 +66,7 @@
   setInterval(tick, 15000); tick();
 
   // ---------- HA websocket ----------
+  var cameraEvents = {}, stopCamera;
   function request(msg) {
     return new Promise(function (resolve, reject) {
       var id = nextId++; msg.id = id; pending[id] = { resolve: resolve, reject: reject };
@@ -95,9 +96,10 @@
       else if (m.type === 'auth_invalid') { beacon('auth', 'invalid'); setStatus('HA rejected the TV token', 'bad'); showMsg('Home Assistant rejected the TV token.'); }
       else if (m.type === 'auth_ok') { beacon('auth', 'ok'); start(); }
       else if (m.type === 'result' && pending[m.id]) { var p = pending[m.id]; delete pending[m.id]; m.success ? p.resolve(m.result) : p.reject(new Error((m.error && m.error.message) || 'error')); }
+      else if (m.type === 'event' && cameraEvents[m.id]) { cameraEvents[m.id](m.event); }
       else if (m.type === 'event' && m.event && m.event.event_type === 'state_changed') { onChanged(m.event.data); }
     };
-    ws.onclose = function () { setStatus('disconnected — retrying', 'bad'); setTimeout(connect, 5000); };
+    ws.onclose = function () { closeCamera(); setStatus('disconnected — retrying', 'bad'); setTimeout(connect, 5000); };
     ws.onerror = function () { try { ws.close(); } catch (e) {} };
   }
   function start() {
@@ -130,7 +132,7 @@
     var had = !!states[d.entity_id];
     if (d.new_state) states[d.entity_id] = d.new_state; else delete states[d.entity_id];
     var dm = dom(d.entity_id);
-    if ((page === 'cameras' && dm === 'camera') ||
+    if ((page === 'security' && (dm === 'lock' || dm === 'alarm_control_panel')) || (page === 'cameras' && dm === 'camera') ||
         (page === 'energy' && dm === 'sensor' && (meterKind(d.old_state) || meterKind(d.new_state)))) {
       renderKeepSel();
       return;
@@ -364,21 +366,22 @@
 
   function renderReadings(grid) {
     var count = 0;
-    var groups = page === 'cameras' ? ['camera'] : ['power', 'energy'];
+    var groups = page === 'cameras' ? ['camera'] : page === 'security' ? ['security'] : ['power', 'energy'];
     groups.forEach(function (group) {
       var ids = Object.keys(states).filter(function (id) {
         if (entArea[id] === '\u0000hidden') return false;
-        return group === 'camera' ? dom(id) === 'camera' : dom(id) === 'sensor' && meterKind(states[id]) === group;
+        if (group === 'security') return dom(id) === 'lock' || dom(id) === 'alarm_control_panel';
+        return group === 'camera' ? dom(id) === 'camera' && !/last_recording/i.test(id) : dom(id) === 'sensor' && meterKind(states[id]) === group;
       }).sort(function (a, b) { return nameOf(a).localeCompare(nameOf(b)); });
       if (!ids.length) return;
-      grid.appendChild(el('div', 'area', T({camera:'Cameras', power:'Power', energy:'Energy meters'}[group])));
+      grid.appendChild(el('div', 'area', T({security:'Security', camera:'Cameras', power:'Power', energy:'Energy meters'}[group])));
       var row = el('div', 'row'); grid.appendChild(row);
       ids.forEach(function (id) {
         var s = states[id], tile = el('div', 'tile nav reading');
         tile.dataset.kind = group;
         tile.dataset.key = id;
         tile.appendChild(el('div', 'name', nameOf(id)));
-        tile.appendChild(el('div', 'state', group === 'camera' ? T(s.state) + ' · ' + T('OK for snapshot') :
+        tile.appendChild(el('div', 'state', group === 'camera' ? T(s.state) + ' · ' + T('OK for live view') :
           T(s.state) + (isFinite(parseFloat(s.state)) ? ' ' + (s.attributes.unit_of_measurement || '') : '')));
         row.appendChild(tile);
       });
@@ -388,37 +391,41 @@
     mark();
   }
 
-  function closeSnapshot() {
-    var overlay = $('snapshot');
+  function closeCamera() {
+    if (stopCamera) { stopCamera(); stopCamera = null; }
+    var overlay = $('stream-view');
     if (overlay) overlay.remove();
   }
-
-  function showSnapshot(id) {
-    closeSnapshot();
-    var overlay = el('section', 'snapshot');
-    overlay.id = 'snapshot';
-    var caption = el('div', 'area', nameOf(id));
-    var status = el('div', 'msg', T('Loading snapshot'));
-    overlay.appendChild(caption); overlay.appendChild(status); document.body.appendChild(overlay);
-    var path = states[id] && states[id].attributes.entity_picture;
-    if (DEMO || !ws || !path || path.indexOf('/api/camera_proxy/') !== 0) {
-      status.textContent = T(DEMO ? 'Demo camera' : 'Snapshot unavailable');
-      return;
-    }
-    var img = el('img'); img.alt = nameOf(id);
-    img.onload = function () { status.remove(); };
-    img.onerror = function () { img.remove(); status.textContent = T('Snapshot unavailable'); };
-    var base = ws.url.replace(/^ws/, 'http');
-    img.src = new URL(path, base).href + (path.indexOf('?') >= 0 ? '&' : '?') + 'time=' + Date.now();
-    overlay.appendChild(img);
+  function openCamera(id) {
+    closeCamera();
+    var overlay = el('section','snapshot'); overlay.id = 'stream-view';
+    overlay.appendChild(el('div','area',nameOf(id)));
+    var status = el('div','msg',T(DEMO ? 'Demo camera' : 'Connecting live feed'));
+    overlay.appendChild(status); document.body.appendChild(overlay);
+    if (DEMO || !ws) return;
+    stopCamera = startHubCamera(id,{
+      t:T, request:request, origin:ws.url.replace(/^ws/,'http'),
+      subscribe:function(msg,fn,failed) {
+        var key = nextId; cameraEvents[key] = fn; request(msg).catch(failed); return key;
+      },
+      unsubscribe:function(key) {
+        delete cameraEvents[key];
+        if (ws.readyState === 1) request({type:'unsubscribe_events',subscription:key}).catch(function(){});
+      },
+      log:function(outcome) { beacon('livecamera',outcome); }
+    },overlay,status);
   }
 
   function render() {
-    renderTabs(); var g = $('grid'); g.textContent = ''; model = {};
-    if (page === 'energy' || page === 'cameras') { renderReadings(g); return; }
+    document.body.classList.toggle('home',page === 'now'); renderTabs(); var g = $('grid'); g.textContent = ''; model = {};
+    if (page === 'security' || page === 'energy' || page === 'cameras') { renderReadings(g); return; }
     if (page === 'insights') { g.innerHTML = insightsHtml(); mark(); return; }
     if (page === 'health') { g.innerHTML = healthHtml(); mark(); return; }
-    if (page === 'now') g.appendChild(statusStrip());
+    document.body.classList.toggle('home',page === 'now');
+    if (page === 'now') {
+      g.appendChild(hubHome(states,T,SPOTIFY,nameOf,entArea));
+      g.appendChild(statusStrip());
+    }
     var secs = sectionsFor(page), count = 0;
     secs.forEach(function (sec) {
       if (!sec.tiles.length) return;
@@ -430,8 +437,8 @@
     if (!count && page !== 'now') showMsg(T('Nothing to show here.'));
     mark();
   }
-  function renderKeepSel() { var keep = selKey; render(); if (keep) { selKey = keep; mark(); } }
-  function setPage(p) { if (p === page) return; closeSnapshot(); page = p; render(); beacon('page', p); }
+  function renderKeepSel() { var top = $('grid').scrollTop; render(); $('grid').scrollTop = top; }
+  function setPage(p) { if (p === page) return; closeCamera(); page = p; render(); beacon('page', p); }
 
   // ---------- spatial navigation ----------
   function navEls() { return Array.prototype.slice.call(document.querySelectorAll('.nav')); }
@@ -441,7 +448,7 @@
     navEls().forEach(function (e) { e.classList.remove('sel'); });
     var all = navEls(), t = target;
     if (!t) { for (var i = 0; i < all.length; i++) { if (keyOf(all[i]) === selKey) { t = all[i]; break; } } }
-    if (!t) t = document.querySelector('.tile') || document.querySelector('.tab.active');
+    if (!t) t = document.querySelector('.hub-card') || document.querySelector('.tile') || document.querySelector('.tab.active');
     if (t) {
       if (t.dataset.kind === 'tab' && t.dataset.page !== page) { selKey = keyOf(t); setPage(t.dataset.page); return; }   // focusing a tab opens its page
       t.classList.add('sel'); selKey = keyOf(t);
@@ -470,7 +477,8 @@
   }
   function activate() {
     var cur = curEl(); if (!cur) return;
-    if (cur.dataset.kind === 'camera') { showSnapshot(cur.dataset.key); return; }
+    if (cur.dataset.kind === 'shortcut') { selKey = 'tab|' + cur.dataset.page; setPage(cur.dataset.page); return; }
+    if (cur.dataset.kind === 'camera') { openCamera(cur.dataset.key); return; }
     if (cur.dataset.kind === 'power' || cur.dataset.kind === 'energy') return;
     if (cur.dataset.kind === 'tab') { setPage(cur.dataset.page); return; }
     if (cur.dataset.kind === 'lang') { toggleLang(); return; }
@@ -523,8 +531,8 @@
   }
   document.addEventListener('keydown', function (e) {
     var k = e.keyCode;
-    if ($('snapshot')) {
-      if (k === 10009 || k === 27 || k === 13) closeSnapshot();
+    if ($('stream-view')) {
+      if (k === 10009 || k === 27 || k === 13) closeCamera();
       e.preventDefault(); return;
     }
     if (keysSeen < 25) { keysSeen++; beacon('key', { code: k, sel: selKey }); }
