@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets"
-        id="http://y214.co/YtvHub" version="2.6.1" viewmodes="maximized">
+        id="http://y214.co/YtvHub" version="2.6.2" viewmodes="maximized">
   <tizen:application id="Y214YtvHub.Hub" package="Y214YtvHub" required_version="6.0"/>
   <content src="index.html"/>
   <feature name="http://tizen.org/feature/screen.size.all"/>
-  <icon src="icon.png"/>
+  <icon src="y214-launcher.png"/>
   <name>Y214 Hub</name>
   <tizen:privilege name="http://tizen.org/privilege/internet"/>
   <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
