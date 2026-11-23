@@ -77,3 +77,29 @@ main { top:154px; }
   border-radius:18px; padding:24px; text-align:center; }
 .snapshot img { display:block; width:100%; height:86%; object-fit:contain; }
 footer { border-top:1px solid #234247; background:#060c0d; }
+.snapshot video { width:100%; height:84%; object-fit:contain; background:#010405; }
+.snapshot .msg { position:absolute; inset:35% 8% auto; z-index:1; }
+.home header { height:75px; display:flex; justify-content:space-between; padding:0 55px; }
+.home #brand { position:absolute; left:50%; transform:translateX(-50%); font-size:25px; letter-spacing:.45em; color:#41eff5; }
+.home #brand b { display:none; }
+.home #when { order:-1; }
+.home #tabs { position:absolute; z-index:3; bottom:48px; left:32px; right:32px; height:69px; justify-content:space-around; background:#050e10; border-block:1px solid #20545a; }
+.tab { padding:8px 13px; font-size:24px; }
+.home main { top:75px; bottom:122px; padding:16px 44px 25px; }
+.home footer {height:48px;}
+.overview { display:grid; grid-template-columns:repeat(10,minmax(0,1fr)); grid-template-rows:215px 215px 235px; gap:16px; margin-bottom:32px;}
+.hub-hero,.hub-card {position:relative;overflow:hidden;border:2px solid #205057;border-radius:15px;background:linear-gradient(135deg,#041316,#04090b); }
+.hub-hero { grid-column:span 6;grid-row:span 2;display:flex;flex-direction:column;align-items:center;justify-content:center; background:radial-gradient(ellipse at 50% 43%,#083239 0,#02090b 64%);}
+.skyline {position:absolute; inset:0;width:100%;height:100%;pointer-events:none;}
+.hero-mark,.hub-hero h1,.hub-hero small { position:relative; }
+.hero-mark {font:italic 800 140px Georgia,serif;letter-spacing:-.12em;padding-inline-end:.12em;color:#30e6ee;text-shadow:0 0 24px #037882;}
+.hub-hero h1 { margin:18px 0 8px;font-size:47px;letter-spacing:.20em;font-weight:500;}
+.hub-hero small { border-top:1px solid #227681;padding-top:10px;font-size:16px;letter-spacing:.32em;}
+.hub-card {grid-column:span 2;display:flex;flex-direction:column;justify-content:space-between;padding:26px;min-width:0;}
+.hub-card.scenes-card,.hub-card.media-card {grid-column:span 4;}
+.hub-label {color:#b3eff0;text-transform:uppercase;letter-spacing:.15em;font-size:22px;}
+.hub-card strong {color:#edfcff;font-size:44px;font-weight:450;line-height:1.18;overflow:hidden;}
+.hub-card small {font-size:21px;color:#9cb8bc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.scenes-card strong,.media-card strong {font-size:33px;}
+[dir=rtl] .hub-label {letter-spacing:0;}
+
