@@ -11,7 +11,7 @@
     document.body.style.zoom = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
   }
   fitScreen(); window.addEventListener('resize', fitScreen);
-  var VERSION = '2.4.0';
+  var VERSION = '2.5.0';
   var HUBQ = (location.search.match(/[?&]hub=([^&]+)/) || [])[1];            // dev/test override only (never set on the TV)
   var HUB = HUBQ ? decodeURIComponent(HUBQ) : 'http://192.168.3.96:8099';
   var DEMO = /[?&]demo\b/.test(location.search);
@@ -20,7 +20,7 @@
     { id: 'scenes', name: 'Scenes' }, { id: 'cameras', name: 'Cameras' }, { id: 'energy', name: 'Energy' }, { id: 'insights', name: 'Insights' }, { id: 'security', name: 'Security' }, { id: 'health', name: 'Health' }];
   // ---------- language: English / Arabic (toggle tab in the header; remembered on the TV) ----------
   var LANG = (function () { try { return localStorage.getItem('y214hub.lang') || 'en'; } catch (e) { return 'en'; } })();
-  var AR = { 'Live feed unavailable':'البث المباشر غير متاح', 'OK for live view':'اضغط للبث المباشر', 'Connecting live feed':'جار الاتصال بالبث المباشر', 'Lighting':'الإضاءة','Climate':'التكييف','Security':'الأمان','Media':'الوسائط','Home':'الرئيسية','No reading':'لا توجد قراءة','Demo camera':'كاميرا تجريبية',
+  var AR = { 'Target':'الهدف', 'Live feed unavailable':'البث المباشر غير متاح', 'OK for live view':'اضغط للبث المباشر', 'Connecting live feed':'جار الاتصال بالبث المباشر', 'Lighting':'الإضاءة','Climate':'التكييف','Security':'الأمان','Media':'الوسائط','Home':'الرئيسية','No reading':'لا توجد قراءة','Demo camera':'كاميرا تجريبية',
     Cameras: 'الكاميرات', Energy: 'الطاقة', Power: 'القدرة', 'Energy meters': 'عدادات الطاقة',
     'OK for snapshot': 'اضغط لعرض الصورة', 'Snapshot unavailable': 'الصورة غير متاحة',
     'Demo camera': 'كاميرا تجريبية', 'Loading snapshot': 'جار تحميل الصورة',
@@ -311,7 +311,7 @@
   }
   function renderTabs() {
     var t = $('tabs'); t.textContent = '';
-    PAGES.forEach(function (p) { var b = el('div', 'tab nav' + (p.id === page ? ' active' : ''), T(p.name)); b.dataset.kind = 'tab'; b.dataset.page = p.id; b.dataset.key = 'tab|' + p.id; t.appendChild(b); });
+    PAGES.forEach(function (p) { var b = el('div', 'tab nav' + (p.id === page ? ' active' : ''), T(({now:'Home',cool:'Climate',music:'Media'})[p.id] || p.name)); b.dataset.kind = 'tab'; b.dataset.page = p.id; b.dataset.key = 'tab|' + p.id; t.appendChild(b); });
     var lg = el('div', 'tab nav lang', LANG === 'ar' ? 'EN' : 'عربي'); lg.dataset.kind = 'lang'; lg.dataset.key = 'lang'; t.appendChild(lg);
   }
   // ---- insights / health: drawn, read-only
@@ -416,14 +416,35 @@
     },overlay,status);
   }
 
+  var meterHistoryCache = {};
+  function meterHistory(id) {
+    if (!ws || ws.readyState !== 1) return Promise.resolve([]);
+    var now = Date.now(), old = meterHistoryCache[id];
+    if (old && now-old.at < 300000) return old.values;
+    var values = request({type:'history/history_during_period', start_time:new Date(now-86400000).toISOString(),
+      end_time:new Date(now).toISOString(), entity_ids:[id],minimal_response:true,no_attributes:true}).then(function(result){
+      var buckets = Array.from({length:24},function(){return [];});
+      (result[id] || []).forEach(function(row) {
+        var hour = Math.floor((Number(row.lu)*1000-(now-86400000))/3600000), value = parseFloat(row.s);
+        if (hour>=0 && hour<24 && isFinite(value)) buckets[hour].push(value);
+      });
+      if (!buckets.some(function(b){return b.length;})) return [];
+      return buckets.map(function(b){return b.length ? b.reduce(function(a,v){return a+v;},0)/b.length : null;});
+    }).catch(function(){return [];});
+    meterHistoryCache[id]={at:now,values:values};return values;
+  }
+
   function render() {
-    document.body.classList.toggle('home',page === 'now'); renderTabs(); var g = $('grid'); g.textContent = ''; model = {};
+    document.body.classList.toggle('home',page === 'now'); document.body.dataset.page = page;
+    var title = PAGES.find(function (entry) { return entry.id === page; });
+    $('section-title').textContent = title ? T(({now:'Home',cool:'Climate',music:'Media'})[page] || title.name) : '';
+    renderTabs(); var g = $('grid'); g.textContent = ''; model = {};
     if (page === 'security' || page === 'energy' || page === 'cameras') { renderReadings(g); return; }
     if (page === 'insights') { g.innerHTML = insightsHtml(); mark(); return; }
     if (page === 'health') { g.innerHTML = healthHtml(); mark(); return; }
     document.body.classList.toggle('home',page === 'now');
     if (page === 'now') {
-      g.appendChild(hubHome(states,T,SPOTIFY,nameOf,entArea));
+      g.appendChild(hubHome(states,T,SPOTIFY,nameOf,entArea,sceneTiles(),ws && ws.url.replace(/^ws/,'http'),meterHistory));
       g.appendChild(statusStrip());
     }
     var secs = sectionsFor(page), count = 0;
@@ -438,7 +459,7 @@
     mark();
   }
   function renderKeepSel() { var top = $('grid').scrollTop; render(); $('grid').scrollTop = top; }
-  function setPage(p) { if (p === page) return; closeCamera(); page = p; render(); beacon('page', p); }
+  function setPage(p) { if (p === page) return; closeCamera(); page = p; selKey = 'tab|' + p; render(); $('grid').scrollTop = 0; beacon('page', p); }
 
   // ---------- spatial navigation ----------
   function navEls() { return Array.prototype.slice.call(document.querySelectorAll('.nav')); }
@@ -450,9 +471,8 @@
     if (!t) { for (var i = 0; i < all.length; i++) { if (keyOf(all[i]) === selKey) { t = all[i]; break; } } }
     if (!t) t = document.querySelector('.hub-card') || document.querySelector('.tile') || document.querySelector('.tab.active');
     if (t) {
-      if (t.dataset.kind === 'tab' && t.dataset.page !== page) { selKey = keyOf(t); setPage(t.dataset.page); return; }   // focusing a tab opens its page
       t.classList.add('sel'); selKey = keyOf(t);
-      if (t.dataset.kind === 'tab') $('grid').scrollTop = 0; else if (document.querySelector('.tile') === t) $('grid').scrollTop = 0; else t.scrollIntoView({ block: 'center' });
+      if (t.dataset.kind === 'tab' || t.dataset.kind === 'lang') return; else if (document.querySelector('.tile') === t) $('grid').scrollTop = 0; else t.scrollIntoView({ block: 'center' });
     }
   }
   function move(dir) {
@@ -477,6 +497,11 @@
   }
   function activate() {
     var cur = curEl(); if (!cur) return;
+    if (cur.dataset.kind === 'home-scene') {
+      var scene = sceneTiles().find(function(tile){return tile.eid === cur.dataset.key;});
+      if (scene) call(dom(scene.eid),'turn_on',scene.eid,null,scene.name);
+      return;
+    }
     if (cur.dataset.kind === 'shortcut') { selKey = 'tab|' + cur.dataset.page; setPage(cur.dataset.page); return; }
     if (cur.dataset.kind === 'camera') { openCamera(cur.dataset.key); return; }
     if (cur.dataset.kind === 'power' || cur.dataset.kind === 'energy') return;
