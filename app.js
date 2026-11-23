@@ -7,16 +7,23 @@
 // Only light / fan / climate / vacuum / scene / script / media_player.spotify are ever CALLED — never switches or plugs; scenes/scripts that touch sockets are hidden.
 (function () {
   'use strict';
-  var VERSION = '2.2.0';
+  function fitScreen() {
+    document.body.style.zoom = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+  }
+  fitScreen(); window.addEventListener('resize', fitScreen);
+  var VERSION = '2.3.0';
   var HUBQ = (location.search.match(/[?&]hub=([^&]+)/) || [])[1];            // dev/test override only (never set on the TV)
   var HUB = HUBQ ? decodeURIComponent(HUBQ) : 'http://192.168.3.96:8099';
   var DEMO = /[?&]demo\b/.test(location.search);
   var SPOTIFY = 'media_player.spotify';
   var PAGES = [{ id: 'now', name: 'Now', key: 403 }, { id: 'rooms', name: 'Rooms', key: 404 }, { id: 'devices', name: 'Devices' }, { id: 'cool', name: 'Cooling', key: 405 }, { id: 'music', name: 'Music', key: 406 },
-    { id: 'scenes', name: 'Scenes' }, { id: 'insights', name: 'Insights' }, { id: 'health', name: 'Health' }];
+    { id: 'scenes', name: 'Scenes' }, { id: 'cameras', name: 'Cameras' }, { id: 'energy', name: 'Energy' }, { id: 'insights', name: 'Insights' }, { id: 'health', name: 'Health' }];
   // ---------- language: English / Arabic (toggle tab in the header; remembered on the TV) ----------
   var LANG = (function () { try { return localStorage.getItem('y214hub.lang') || 'en'; } catch (e) { return 'en'; } })();
   var AR = {
+    Cameras: 'الكاميرات', Energy: 'الطاقة', Power: 'القدرة', 'Energy meters': 'عدادات الطاقة',
+    'OK for snapshot': 'اضغط لعرض الصورة', 'Snapshot unavailable': 'الصورة غير متاحة',
+    'Demo camera': 'كاميرا تجريبية', 'Loading snapshot': 'جار تحميل الصورة',
     'Now': 'الآن', 'Rooms': 'الغرف', 'Devices': 'الأجهزة', 'Cooling': 'التبريد', 'Music': 'الموسيقى', 'Scenes': 'المشاهد', 'Insights': 'العادات', 'Health': 'الحالة',
     'on': 'يعمل', 'off': 'مطفأ', 'unavailable': 'غير متصل', 'scene': 'مشهد', 'script': 'إجراء', 'playing': 'يشغّل', 'paused': 'متوقف مؤقتاً', 'idle': 'خامل', 'not active': 'غير نشط',
     'docked': 'في القاعدة', 'cleaning': 'ينظّف', 'returning': 'يعود للقاعدة', 'charging': 'يشحن', 'error': 'خطأ', 'cool': 'تبريد', 'heat': 'تدفئة', 'auto': 'تلقائي', 'dry': 'تجفيف', 'fan_only': 'مروحة',
@@ -123,6 +130,11 @@
     var had = !!states[d.entity_id];
     if (d.new_state) states[d.entity_id] = d.new_state; else delete states[d.entity_id];
     var dm = dom(d.entity_id);
+    if ((page === 'cameras' && dm === 'camera') ||
+        (page === 'energy' && dm === 'sensor' && (meterKind(d.old_state) || meterKind(d.new_state)))) {
+      renderKeepSel();
+      return;
+    }
     if (!(dm === 'light' || dm === 'climate' || dm === 'fan' || dm === 'vacuum' || dm === 'scene' || dm === 'script' || dm === 'person' || dm === 'automation' || d.entity_id === SPOTIFY || d.new_state && d.new_state.state === 'unavailable')) return;
     if (had !== !!d.new_state) { renderKeepSel(); return; }
     clearTimeout(refillTimer); refillTimer = setTimeout(function () { if (page === 'now' || page === 'health') renderKeepSel(); else if (page !== 'insights') refillAll(); }, 250);
@@ -345,8 +357,65 @@
     html += '<div class="panel"><h3>Tidiness</h3><div class="list">' + (noArea ? '<div><span class="bad">●</span> ' + noArea + ' lights have no room assigned</div>' : '<div class="ok">✔ every light has a room</div>') + '<div class="dim">Names and rooms are kept in step with Alexa and Home Assistant — see the Names &amp; freshness report on the PC.</div></div></div>';
     return html;
   }
+  function meterKind(state) {
+    var kind = state && state.attributes && state.attributes.device_class;
+    return kind === 'power' || kind === 'energy' ? kind : '';
+  }
+
+  function renderReadings(grid) {
+    var count = 0;
+    var groups = page === 'cameras' ? ['camera'] : ['power', 'energy'];
+    groups.forEach(function (group) {
+      var ids = Object.keys(states).filter(function (id) {
+        if (entArea[id] === '\u0000hidden') return false;
+        return group === 'camera' ? dom(id) === 'camera' : dom(id) === 'sensor' && meterKind(states[id]) === group;
+      }).sort(function (a, b) { return nameOf(a).localeCompare(nameOf(b)); });
+      if (!ids.length) return;
+      grid.appendChild(el('div', 'area', T({camera:'Cameras', power:'Power', energy:'Energy meters'}[group])));
+      var row = el('div', 'row'); grid.appendChild(row);
+      ids.forEach(function (id) {
+        var s = states[id], tile = el('div', 'tile nav reading');
+        tile.dataset.kind = group;
+        tile.dataset.key = id;
+        tile.appendChild(el('div', 'name', nameOf(id)));
+        tile.appendChild(el('div', 'state', group === 'camera' ? T(s.state) + ' · ' + T('OK for snapshot') :
+          T(s.state) + (isFinite(parseFloat(s.state)) ? ' ' + (s.attributes.unit_of_measurement || '') : '')));
+        row.appendChild(tile);
+      });
+      count += ids.length;
+    });
+    if (!count) showMsg(T('Nothing to show here.'));
+    mark();
+  }
+
+  function closeSnapshot() {
+    var overlay = $('snapshot');
+    if (overlay) overlay.remove();
+  }
+
+  function showSnapshot(id) {
+    closeSnapshot();
+    var overlay = el('section', 'snapshot');
+    overlay.id = 'snapshot';
+    var caption = el('div', 'area', nameOf(id));
+    var status = el('div', 'msg', T('Loading snapshot'));
+    overlay.appendChild(caption); overlay.appendChild(status); document.body.appendChild(overlay);
+    var path = states[id] && states[id].attributes.entity_picture;
+    if (DEMO || !ws || !path || path.indexOf('/api/camera_proxy/') !== 0) {
+      status.textContent = T(DEMO ? 'Demo camera' : 'Snapshot unavailable');
+      return;
+    }
+    var img = el('img'); img.alt = nameOf(id);
+    img.onload = function () { status.remove(); };
+    img.onerror = function () { img.remove(); status.textContent = T('Snapshot unavailable'); };
+    var base = ws.url.replace(/^ws/, 'http');
+    img.src = new URL(path, base).href + (path.indexOf('?') >= 0 ? '&' : '?') + 'time=' + Date.now();
+    overlay.appendChild(img);
+  }
+
   function render() {
     renderTabs(); var g = $('grid'); g.textContent = ''; model = {};
+    if (page === 'energy' || page === 'cameras') { renderReadings(g); return; }
     if (page === 'insights') { g.innerHTML = insightsHtml(); mark(); return; }
     if (page === 'health') { g.innerHTML = healthHtml(); mark(); return; }
     if (page === 'now') g.appendChild(statusStrip());
@@ -362,7 +431,7 @@
     mark();
   }
   function renderKeepSel() { var keep = selKey; render(); if (keep) { selKey = keep; mark(); } }
-  function setPage(p) { if (p === page) return; page = p; render(); beacon('page', p); }
+  function setPage(p) { if (p === page) return; closeSnapshot(); page = p; render(); beacon('page', p); }
 
   // ---------- spatial navigation ----------
   function navEls() { return Array.prototype.slice.call(document.querySelectorAll('.nav')); }
@@ -401,6 +470,8 @@
   }
   function activate() {
     var cur = curEl(); if (!cur) return;
+    if (cur.dataset.kind === 'camera') { showSnapshot(cur.dataset.key); return; }
+    if (cur.dataset.kind === 'power' || cur.dataset.kind === 'energy') return;
     if (cur.dataset.kind === 'tab') { setPage(cur.dataset.page); return; }
     if (cur.dataset.kind === 'lang') { toggleLang(); return; }
     if (cur.dataset.kind === 'mini') {
@@ -451,7 +522,12 @@
     else if (e2 === SPOTIFY) call('media_player', 'media_play_pause', e2, null, 'Spotify');
   }
   document.addEventListener('keydown', function (e) {
-    var k = e.keyCode; if (keysSeen < 25) { keysSeen++; beacon('key', { code: k, sel: selKey }); }
+    var k = e.keyCode;
+    if ($('snapshot')) {
+      if (k === 10009 || k === 27 || k === 13) closeSnapshot();
+      e.preventDefault(); return;
+    }
+    if (keysSeen < 25) { keysSeen++; beacon('key', { code: k, sel: selKey }); }
     if (k === 37) { move('left'); e.preventDefault(); } else if (k === 39) { move('right'); e.preventDefault(); }
     else if (k === 38) { move('up'); e.preventDefault(); } else if (k === 40) { move('down'); e.preventDefault(); }
     else if (k === 13) { if (canDemo && !DEMO) { DEMO = true; canDemo = false; connect(); } else activate(); e.preventDefault(); }
@@ -473,7 +549,7 @@
     if (!selectTileEl(found)) return false;
     toast('🎤 ' + model[found].name); activate(); return true;
   }
-  function visibleTiles() { return Array.prototype.slice.call(document.querySelectorAll('.tile')).filter(function (t) { var r = t.getBoundingClientRect(); return r.width && r.bottom > 0 && r.top < 1080; }); }
+  function visibleTiles() { return Array.prototype.slice.call(document.querySelectorAll('.tile')).filter(function (t) { var r = t.getBoundingClientRect(); return r.width && r.bottom > 0 && r.top < window.innerHeight; }); }
   function setupVoice() {
     var vi = window.webapis && webapis.voiceinteraction;
     if (!vi) { beacon('voice', 'webapis.voiceinteraction not available'); return; }
@@ -522,6 +598,9 @@
   }
   function loadDemo() {
     var S = function (id, state, name, a) { states[id] = { entity_id: id, state: state, attributes: Object.assign({ friendly_name: name }, a || {}) }; };
+    S('camera.demo', 'idle', 'Demo camera');
+    S('sensor.demo_power', '452', 'Apartment power', {device_class:'power', unit_of_measurement:'W'});
+    S('sensor.demo_energy', '12.6', 'Meter energy', {device_class:'energy', unit_of_measurement:'kWh'});
     S('light.lr_ceiling', 'on', 'LR ceiling', { brightness: 200 }); S('light.lr_nano', 'on', 'Nanoleaf wall', { brightness: 120 }); S('light.lr_lamp', 'off', 'LR lamp'); S('light.tv_lights', 'on', 'TV Lights');
     S('light.mbr_main', 'off', 'Master main'); S('light.mbr_bed', 'on', 'Bed light', { brightness: 80 }); S('light.hall', 'off', 'Hall LED strip'); S('light.kitchen', 'on', 'Kitchen', { brightness: 255 }); S('light.guest', 'unavailable', 'Guest lamp');
     S('climate.ac1', 'cool', 'Living Room AC', { current_temperature: 25.5, temperature: 24, target_temp_step: 0.5 }); S('climate.ac2', 'off', 'Bedroom AC', { current_temperature: 27, temperature: 24 });
