@@ -1,4 +1,4 @@
-function hubHome(states, t, spotify, nameOf, areas, sceneList, haOrigin, energyHistory) {
+function hubHome(states, t, spotify, nameOf, areas, sceneList, haOrigin, energyHistory, ringIds) {
   const make = (tag, cls, text) => {
     const n = document.createElement(tag); n.className = cls;
     if (text != null) n.textContent = text;
@@ -8,7 +8,7 @@ function hubHome(states, t, spotify, nameOf, areas, sceneList, haOrigin, energyH
   const lights = ids.filter(id => id.startsWith('light.') && states[id].state !== 'unavailable');
   const climate = ids.find(id => id.startsWith('climate.') && states[id].attributes.current_temperature != null);
   const power = ids.filter(id => states[id].attributes.device_class === 'power' && Number.isFinite(parseFloat(states[id].state)));
-  const cameras = ids.filter(id => id.startsWith('camera.') && !/last_recording/i.test(id));
+  const cameras = ringIds;
   const security = ids.filter(id => id.startsWith('alarm_control_panel.') || id.startsWith('lock.'));
   const root = make('div','overview');
   const hero = make('div','hub-hero');
