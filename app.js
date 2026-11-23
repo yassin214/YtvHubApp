@@ -431,7 +431,7 @@
   }
   function openCamera(id) {
     closeCamera();
-    var overlay = el('section','snapshot'); overlay.id = 'stream-view';
+    stopPreview(); var overlay = el('section','snapshot'); overlay.id = 'stream-view';
     overlay.appendChild(el('div','area',nameOf(id)));
     var status = el('div','msg',T(DEMO ? 'Demo camera' : 'Connecting live feed'));
     overlay.appendChild(status); document.body.appendChild(overlay);
@@ -446,7 +446,53 @@
       im.src=new URL(cp,ws.url.replace(/^ws/,'http')).href+(cp.includes('?')?'&':'?')+'time='+Date.now();
       overlay.append(im);return;
     }
-    stopCamera = startHubCamera(id,{
+    stopCamera = startHubCamera(id,cameraApi(),overlay,status);
+  }
+
+  const previewFrames = new Map(), previewAttempts = new Map();
+  let activePreview = null;
+  function stopPreview() {
+    if (!activePreview) return;
+    const job = activePreview; activePreview = null;
+    job.stop(); job.host.remove();
+  }
+  function updatePreviews() {
+    const tiles = Array.from(document.querySelectorAll('[data-preview]'));
+    if (DEMO || !ws || ws.readyState !== 1 || document.hidden || !tiles.length || document.getElementById('stream-view')) {
+      stopPreview(); return;
+    }
+    const now = Date.now();
+    for (const tile of tiles) {
+      const id = tile.dataset.preview, frame = previewFrames.get(id);
+      let img = tile.querySelector('img');
+      if (frame && now-frame.time < 120000) {
+        if (!img) { img = document.createElement('img'); img.className='ha-picture'; img.alt=''; tile.prepend(img); }
+        if (img.getAttribute('src') !== frame.src) img.src=frame.src;
+      } else if (img) img.remove();
+    }
+    if (activePreview) {
+      const job = activePreview, video = job.host.querySelector('video');
+      if (video && video.readyState >= 2 && video.videoWidth && video.currentTime > 0) {
+        try {
+          const canvas=document.createElement('canvas'); canvas.width=320; canvas.height=Math.max(1,Math.round(320*video.videoHeight/video.videoWidth));
+          canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+          previewFrames.set(job.id,{time:now,src:canvas.toDataURL('image/jpeg',0.78)});
+        } catch(e) {}
+        stopPreview();
+      } else if (now-job.started > 25000 || job.status.textContent===T('Live feed unavailable')) stopPreview();
+      return;
+    }
+    const id=tiles.map(tile=>tile.dataset.preview).sort((a,b)=>(previewAttempts.get(a)||0)-(previewAttempts.get(b)||0))[0];
+    if(now-(previewAttempts.get(id)||0)<60000)return;
+    const host=document.createElement('div'), status=document.createElement('span');
+    host.style.cssText='position:fixed;left:-100px;top:0;width:8px;height:8px;overflow:hidden;pointer-events:none';
+    host.setAttribute('aria-hidden','true'); document.body.appendChild(host);
+    previewAttempts.set(id,now);
+    activePreview={id,host,status,started:now,stop:startHubCamera(id,cameraApi(),host,status)};
+  }
+  setInterval(updatePreviews,1000);
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)stopPreview();});
+  function cameraApi(){ return {
       t:T, request:request, origin:ws.url.replace(/^ws/,'http'),
       subscribe:function(msg,fn,failed) {
         var key = nextId; cameraEvents[key] = fn; request(msg).catch(failed); return key;
@@ -456,8 +502,7 @@
         if (ws.readyState === 1) request({type:'unsubscribe_events',subscription:key}).catch(function(){});
       },
       log:function(outcome) { beacon('livecamera',outcome); }
-    },overlay,status);
-  }
+    }; }
 
   var meterHistoryCache = {};
   function meterHistory(id) {
