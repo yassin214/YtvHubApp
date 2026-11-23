@@ -1,0 +1,12 @@
+.map-overlay {position:absolute;inset:18px;z-index:8;background:#071519;color:#deeded;padding:14px;font:27px "Segoe UI",Arial,sans-serif;border:2px solid #289ca4;border-radius:14px;}
+.flatmap {display:grid;grid-template-columns:minmax(0,2.3fr) minmax(360px,1fr);height:95%;box-sizing:border-box;}
+.mapstage {min-width:0;min-height:0;overflow:hidden;position:relative;}
+.mapstage canvas {width:100%;height:100%;display:block;}
+.mapmenu {display:flex;flex-direction:column;gap:11px;min-height:0;background:#102126;padding:16px;}
+.mapmenu h2 {font-size:1.4em;color:#63f6ee;margin:0;}
+.maptools,.mapacts {display:flex;gap:7px;flex-wrap:wrap;}
+.mapmenu button,.mapmenu select {background:#163539;color:#e0f5f5;border:1px solid #49818a;border-radius:6px;padding:8px;font:inherit;}
+.mapmenu select[size] {flex:1;min-height:130px;}.mapmenu :focus {outline:3px solid #5fffe4;}
+.mapdetail {font-size:.84em;word-break:break-word;}.mini.m4 {right:244px;} [dir=rtl] .mini.m4 {right:auto;left:244px;}
+.tile[data-kind=map] {height:auto;width:100%;padding:12px 22px;margin:16px 0;color:#4de8dc;}
+
