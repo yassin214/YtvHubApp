@@ -11,7 +11,7 @@
     document.body.style.zoom = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
   }
   fitScreen(); window.addEventListener('resize', fitScreen);
-  var VERSION = '2.5.1';
+  var VERSION = '2.6.1';
   var HUBQ = (location.search.match(/[?&]hub=([^&]+)/) || [])[1];            // dev/test override only (never set on the TV)
   var HUB = HUBQ ? decodeURIComponent(HUBQ) : 'http://192.168.3.96:8099';
   var DEMO = /[?&]demo\b/.test(location.search);
@@ -20,7 +20,7 @@
     { id: 'scenes', name: 'Scenes' }, { id: 'cameras', name: 'Cameras' }, { id: 'energy', name: 'Energy' }, { id: 'insights', name: 'Insights' }, { id: 'security', name: 'Security' }, { id: 'health', name: 'Health' }];
   // ---------- language: English / Arabic (toggle tab in the header; remembered on the TV) ----------
   var LANG = (function () { try { return localStorage.getItem('y214hub.lang') || 'en'; } catch (e) { return 'en'; } })();
-  var AR = { 'Target':'الهدف', 'Live feed unavailable':'البث المباشر غير متاح', 'OK for live view':'اضغط للبث المباشر', 'Connecting live feed':'جار الاتصال بالبث المباشر', 'Lighting':'الإضاءة','Climate':'التكييف','Security':'الأمان','Media':'الوسائط','Home':'الرئيسية','No reading':'لا توجد قراءة','Demo camera':'كاميرا تجريبية',
+  var AR = { 'Doorbell snapshot':'صورة جرس الباب','Snapshot unavailable':'الصورة غير متاحة','House map':'خريطة المنزل','Live view':'بث مباشر','On / Off':'تشغيل / إيقاف', 'Target':'الهدف', 'Live feed unavailable':'البث المباشر غير متاح', 'OK for live view':'اضغط للبث المباشر', 'Connecting live feed':'جار الاتصال بالبث المباشر', 'Lighting':'الإضاءة','Climate':'التكييف','Security':'الأمان','Media':'الوسائط','Home':'الرئيسية','No reading':'لا توجد قراءة','Demo camera':'كاميرا تجريبية',
     Cameras: 'الكاميرات', Energy: 'الطاقة', Power: 'القدرة', 'Energy meters': 'عدادات الطاقة',
     'OK for snapshot': 'اضغط لعرض الصورة', 'Snapshot unavailable': 'الصورة غير متاحة',
     'Demo camera': 'كاميرا تجريبية', 'Loading snapshot': 'جار تحميل الصورة',
@@ -52,7 +52,12 @@
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function dom(eid) { return eid.split('.')[0]; }
-  function nameOf(eid) { var s = states[eid]; return (s && s.attributes && s.attributes.friendly_name) || eid; }
+  function rawName(eid) { var s = states[eid]; return (s && s.attributes && s.attributes.friendly_name) || eid; }
+  function nameOf(eid) {var n=rawName(eid); return LANG==='ar' ? arabicDevice(n) : n;}
+  function display(s) {return LANG==='ar' ? (AR[s]||arabicDevice(s)) : s;}
+  function ringViews(){
+    return Object.keys(states).filter(e=>dom(e)==='camera' && eligible(e) && (entPlat[e]==='ring'||/_live_view$/.test(e)) && !/last_recording/.test(e)).sort();
+  }
   function setStatus(t, cls) { var s = $('status'); s.textContent = t; s.className = cls || ''; }
   var toastTimer = null;
   function toast(t) { var e = $('toast'); e.textContent = t; e.className = 'show'; clearTimeout(toastTimer); toastTimer = setTimeout(function () { e.className = ''; }, 1800); }
@@ -145,9 +150,15 @@
   // ---------- models: what each page shows ----------
   function eligible(eid) { var s = states[eid]; return !!s && entArea[eid] !== '\u0000hidden'; }
   function roomName(a) { return a.replace(/\s*\([A-Za-z]{1,4}\)\s*$/, ''); }   // "Living Room (LR)" → "Living Room"
+  function lightArea(e){
+    if (/^light\.living_room_(hexa|nano_1)$/.test(e) || (brandOf(e)==='Nanoleaf' && /^(nano|hexa)$/i.test(rawName(e)))) {
+      return Object.values(entArea).find(a=>a && /^living room/i.test(a)) || 'Living Room';
+    }
+    return entArea[e];
+  }
   function roomTiles() {
     var lights = Object.keys(states).filter(function (e) { return dom(e) === 'light' && eligible(e) && !/_segment_\d+$/.test(e); }), byArea = {}, rooms = [];
-    lights.forEach(function (e) { var a = (entArea[e] && entArea[e] !== '\u0000hidden') ? entArea[e] : 'Other'; (byArea[a] = byArea[a] || []).push(e); });
+    lights.forEach(function (e) { var a = lightArea(e) || 'Other'; (byArea[a] = byArea[a] || []).push(e); });
     if (lights.length) rooms.push({ key: 'room|*', kind: 'room', name: T('All lights'), eids: lights });
     Object.keys(byArea).sort(function (a, b) { return a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b); }).forEach(function (a) { rooms.push({ key: 'room|' + a, kind: 'room', name: T(roomName(a)), en: roomName(a), eids: byArea[a] }); });
     return rooms;
@@ -166,6 +177,8 @@
     var lights = Object.keys(states).filter(function (e) { return dom(e) === 'light' && eligible(e) && !/_segment_\d+$/.test(e) && !DUP_HIDE[e] && (entLab[e] || []).indexOf('not_in_room_rules') < 0; });
     var by = {}, secs = [];
     lights.forEach(function (e) { var b = brandOf(e); (by[b] = by[b] || []).push(e); });
+    var fans=coolTiles().filter(t=>dom(t.eid)==='fan');
+    if (fans.length) secs.push({title:display('Fans'),tiles:fans});
     var vac = Object.keys(states).filter(function (e) { return dom(e) === 'vacuum' && eligible(e); });
     if (vac.length) secs.push({ title: T('Robot — OK start / pause, ⌂ back to dock'), tiles: vac.map(function (e) { return { key: 'dev|' + e, kind: 'vac', eid: e, name: nameOf(e) }; }) });
     Object.keys(by).sort(function (a, b) { return by[b].length - by[a].length || a.localeCompare(b); }).forEach(function (b) {
@@ -190,7 +203,7 @@
   function sourceTiles() {
     var s = states[SPOTIFY], list = (s && s.attributes && s.attributes.source_list) || [];
     var rank = function (x) { return /everywhere/i.test(x) ? 0 : 1; };
-    return list.slice().sort(function (a, b) { return rank(a) - rank(b) || a.localeCompare(b); }).map(function (x) { return { key: 'src|' + x, kind: 'src', src: x, name: srcLabel(x) }; });
+    return list.slice().sort(function (a, b) { return rank(a) - rank(b) || a.localeCompare(b); }).map(function (x) { return { key: 'src|' + x, kind: 'src', src: x, name: display(srcLabel(x)) }; });
   }
   function playOn(src) {
     if (DEMO) { toast('Spotify → ' + srcLabel(src)); return; }
@@ -224,7 +237,11 @@
       .map(function (t) { return { key: 'rt|' + t.key, kind: 'ent', eid: t.eid, name: t.name }; });
   }
   function sectionsFor(p) {
-    if (p === 'rooms') return [{ title: T('Rooms — OK toggles the lights, ＋ − dim them'), tiles: roomTiles() }];
+    if(p==='rooms'){
+      var panels=['light.living_room_nano_1','light.living_room_hexa'].filter(eligible);
+      return [{title:display('Rooms'),tiles:roomTiles()},{title:display('Living Room')+' · '+display('Nanoleaf'),
+        tiles:panels.map(e=>({key:'roompanel|'+e,kind:'light',eid:e,name:nameOf(e)}))}];
+    }
     if (p === 'devices') return deviceSections();
     if (p === 'cool') return [{ title: T('Cooling'), tiles: coolTiles() }];
     if (p === 'music') return [{ title: T('Music'), tiles: musicTiles() }, { title: T('Play on - one tap switches where Spotify plays'), tiles: sourceTiles() }];
@@ -275,14 +292,20 @@
     if (sub && AR[sub]) sub = T(sub);
     t.className = 'tile nav ' + cls + (tile.sg ? ' sg' : '') + (selKey === tile.key ? ' sel' : '');
     if (tile.kind === 'ent' && dom(tile.eid) === 'climate') t.className += ' lowmini';
+    if (tile.kind === 'ent' && dom(tile.eid)==='fan') t.className += ' lowmini mini3';
     if (tile.kind === 'room' || tile.kind === 'vac') t.className += ' lowmini';
     if (tile.kind === 'light') t.className += ' lowmini mini3';
-    var nm = el('div', 'name', tile.name); if (tile.eid === SPOTIFY) nm.style.maxWidth = '215px'; t.appendChild(nm);
+    var nm = el('div', 'name', display(tile.name)); if (tile.eid === SPOTIFY) nm.style.maxWidth = '215px'; t.appendChild(nm);
     if (sub) t.appendChild(el('div', 'sub', sub));
     t.appendChild(el('div', 'state', st));
     if (tile.kind === 'ent' && dom(tile.eid) === 'climate') { addMini(t, tile.key, '+', 'up', 'm1'); addMini(t, tile.key, '−', 'down', 'm2'); }
     if (tile.kind === 'room') { addMini(t, tile.key, '☀', 'bup', 'm1'); addMini(t, tile.key, '☾', 'bdn', 'm2'); }
     if (tile.kind === 'light') { addMini(t, tile.key, '☀', 'bup', 'm1'); addMini(t, tile.key, '☾', 'bdn', 'm2'); addMini(t, tile.key, '◐', 'tone', 'm3'); }
+    if (tile.kind==='ent' && dom(tile.eid)==='fan' && a) {
+      if (a.supported_features & 1) {addMini(t,tile.key,'+','fan-up','m1');addMini(t,tile.key,'−','fan-down','m2');}
+      if ((a.preset_modes||[]).length) addMini(t,tile.key,'≋','fan-preset','m3');
+      if (a.supported_features & 2) addMini(t,tile.key,'↔','fan-swing','m4');
+    }
     if (tile.kind === 'vac') { addMini(t, tile.key, '⌂', 'dock', 'm1'); }
     if (tile.kind === 'volume') { addMini(t, tile.key, '+', 'vup', 'm1'); addMini(t, tile.key, '−', 'vdn', 'm2'); }
     if (tile.eid === SPOTIFY) { addMini(t, tile.key, '⏭', 'next', 'm1'); addMini(t, tile.key, '⏮', 'prev', 'm2'); }
@@ -366,27 +389,37 @@
 
   function renderReadings(grid) {
     var count = 0;
-    var groups = page === 'cameras' ? ['camera'] : page === 'security' ? ['security'] : ['power', 'energy'];
+    var groups = page === 'cameras' ? ['ring','echo','camera'] : page === 'security' ? ['security'] : ['power', 'energy'];
     groups.forEach(function (group) {
       var ids = Object.keys(states).filter(function (id) {
         if (entArea[id] === '\u0000hidden') return false;
+        if(group==='ring')return ringViews().includes(id);
+        if(group==='echo')return dom(id)==='camera' && /echo|alexa|amazon/i.test(id+' '+rawName(id));
+        if(group==='camera' && (ringViews().includes(id)||/echo|alexa|amazon/i.test(id+' '+rawName(id))))return false;
         if (group === 'security') return dom(id) === 'lock' || dom(id) === 'alarm_control_panel';
         return group === 'camera' ? dom(id) === 'camera' && !/last_recording/i.test(id) : dom(id) === 'sensor' && meterKind(states[id]) === group;
       }).sort(function (a, b) { return nameOf(a).localeCompare(nameOf(b)); });
       if (!ids.length) return;
-      grid.appendChild(el('div', 'area', T({security:'Security', camera:'Cameras', power:'Power', energy:'Energy meters'}[group])));
+      grid.appendChild(el('div', 'area', display({ring:'Ring',echo:'Echo cameras',security:'Security', camera:'Other cameras', power:'Power', energy:'Energy meters'}[group])));
       var row = el('div', 'row'); grid.appendChild(row);
       ids.forEach(function (id) {
         var s = states[id], tile = el('div', 'tile nav reading');
-        tile.dataset.kind = group;
+        tile.dataset.kind = ['ring','echo','camera'].includes(group)?'camera':group;
         tile.dataset.key = id;
         tile.appendChild(el('div', 'name', nameOf(id)));
-        tile.appendChild(el('div', 'state', group === 'camera' ? T(s.state) + ' · ' + T('OK for live view') :
+        tile.appendChild(el('div', 'state', tile.dataset.kind === 'camera' ? T(s.state) + ' · ' + ((entPlat[id]==='ezviz'||id==='camera.hall_h_1702') && !s.attributes.supported_features ? display('Doorbell snapshot') : T('OK for live view')) :
           T(s.state) + (isFinite(parseFloat(s.state)) ? ' ' + (s.attributes.unit_of_measurement || '') : '')));
         row.appendChild(tile);
       });
       count += ids.length;
     });
+    if(page==='cameras'){
+      var echoes=Object.values(devInfo).filter(d=>/echo show/i.test(d.model||''));
+      if(echoes.length && !Object.keys(states).some(e=>dom(e)==='camera' && /echo|alexa|amazon/i.test(e+' '+rawName(e)))){
+        grid.appendChild(el('div','area',display('Echo cameras')));
+        grid.appendChild(el('div','panel',echoes.map(d=>display(d.model)).join(' · ')+' — '+display('Camera feed not exposed')));
+      }
+    }
     if (!count) showMsg(T('Nothing to show here.'));
     mark();
   }
@@ -403,6 +436,16 @@
     var status = el('div','msg',T(DEMO ? 'Demo camera' : 'Connecting live feed'));
     overlay.appendChild(status); document.body.appendChild(overlay);
     if (DEMO || !ws) return;
+    var cs=states[id],cp=cs && cs.attributes.entity_picture;
+    if ((entPlat[id]==='ezviz'||id==='camera.hall_h_1702') && !cs.attributes.supported_features) {
+      status.textContent=display('Doorbell snapshot');
+      if(!cp || cp.indexOf('/api/camera_proxy/')!==0){status.textContent=display('Snapshot unavailable');return;}
+      var im=el('img'); im.alt=nameOf(id); im.onload=function(){status.hidden=true;};
+      im.onerror=function(){status.textContent=display('Snapshot unavailable');};
+      overlay.firstChild.textContent=nameOf(id)+' · '+display('Doorbell snapshot');
+      im.src=new URL(cp,ws.url.replace(/^ws/,'http')).href+(cp.includes('?')?'&':'?')+'time='+Date.now();
+      overlay.append(im);return;
+    }
     stopCamera = startHubCamera(id,{
       t:T, request:request, origin:ws.url.replace(/^ws/,'http'),
       subscribe:function(msg,fn,failed) {
@@ -434,6 +477,31 @@
     meterHistoryCache[id]={at:now,values:values};return values;
   }
 
+  var mapClose=null, mapOverlay=null, privateMap=null;
+  function closeMap(){if(mapClose)mapClose();mapClose=null;if(mapOverlay)mapOverlay.remove();mapOverlay=null;}
+  async function openMap(){
+    closeMap();var ov=el('section','map-overlay');mapOverlay=ov;document.body.append(ov);ov.textContent=display('Loading');
+    try {
+      if(!privateMap){var response=await fetch(HUB+'/house-map.json',{cache:'no-store'});if(!response.ok)throw Error('map '+response.status);privateMap=await response.json();}
+      if(mapOverlay!==ov)return;
+      var domains=['light','fan','camera','climate','vacuum','media_player','switch','lock','cover','alarm_control_panel'];
+      var ids=Object.keys(states).filter(e=>eligible(e)&&domains.includes(dom(e))&&!/_segment_\d+$/.test(e));
+      var claimed=new Set();
+      function resolve(d){
+        var explicit=d.entities.filter(e=>states[e]); if(explicit.length===1)return explicit[0];
+        var hits=ids.filter(e=>rawName(e).trim().toLowerCase()===d.name.trim().toLowerCase());
+        return hits.length===1?hits[0]:null;
+      }
+      privateMap.devices.forEach(d=>{var id=resolve(d);if(id)claimed.add(id);});
+      var roomAlias={'master bedroom':'Master Room','guest bedroom':'Bedroom 2','guest bathroom':'Bathroom 2','laundry room':'Laundry'};
+      var extra=ids.filter(e=>!claimed.has(e)).map(e=>{var room=roomName(lightArea(e)||'');
+        return {name:rawName(e),room:roomAlias[room.toLowerCase()]||room,kind:dom(e),entities:[e],x:null,y:null,z:null};});
+      var modelData=Object.assign({},privateMap,{devices:privateMap.devices.concat(extra)});
+      mapClose=FlatMap.mount(ov,modelData,{translate:display,close:closeMap,name:nameOf,state:e=>display(states[e]?.state||'unavailable'),resolve:resolve,
+        action:e=>{if(dom(e)==='camera')return {label:'Live view',run:()=>openCamera(e)};
+          if(['light','fan'].includes(dom(e)) && !HIDE_RX.test(e+' '+rawName(e)) && !(entLab[e]||[]).includes('not_in_room_rules'))return {label:'On / Off',run:()=>call(dom(e),'toggle',e,null,nameOf(e))};return null; }});
+    }catch(e){if(mapOverlay===ov)ov.textContent=display('House map')+' · '+e.message+' · '+display('Return');}
+  }
   function render() {
     document.body.classList.toggle('home',page === 'now'); document.body.dataset.page = page;
     var title = PAGES.find(function (entry) { return entry.id === page; });
@@ -444,7 +512,8 @@
     if (page === 'health') { g.innerHTML = healthHtml(); mark(); return; }
     document.body.classList.toggle('home',page === 'now');
     if (page === 'now') {
-      g.appendChild(hubHome(states,T,SPOTIFY,nameOf,entArea,sceneTiles(),ws && ws.url.replace(/^ws/,'http'),meterHistory));
+      g.appendChild(hubHome(states,T,SPOTIFY,nameOf,entArea,sceneTiles(),ws && ws.url.replace(/^ws/,'http'),meterHistory,ringViews()));
+      var mapTile=el('div','tile nav',display('House map'));mapTile.dataset.kind='map';mapTile.dataset.key='house-map';g.insertBefore(mapTile,g.firstChild.nextSibling);
       g.appendChild(statusStrip());
     }
     var secs = sectionsFor(page), count = 0;
@@ -497,6 +566,7 @@
   }
   function activate() {
     var cur = curEl(); if (!cur) return;
+    if (cur.dataset.kind === 'map') {openMap();return;}
     if (cur.dataset.kind === 'home-scene') {
       var scene = sceneTiles().find(function(tile){return tile.eid === cur.dataset.key;});
       if (scene) call(dom(scene.eid),'turn_on',scene.eid,null,scene.name);
@@ -509,6 +579,13 @@
     if (cur.dataset.kind === 'lang') { toggleLang(); return; }
     if (cur.dataset.kind === 'mini') {
       var tile = model[cur.dataset.key], act = cur.dataset.act; if (!tile) return;
+      if (dom(tile.eid||'')==='fan') {
+        var a=states[tile.eid].attributes||{}, modes=a.preset_modes||[], service, args={};
+        if (act==='fan-up'||act==='fan-down') {service='set_percentage';args.percentage=Math.max(0,Math.min(100,Math.round((a.percentage||0)+(act==='fan-up'?1:-1)*(a.percentage_step||10))));}
+        else if(act==='fan-preset' && modes.length){service='set_preset_mode';args.preset_mode=modes[(modes.indexOf(a.preset_mode)+1)%modes.length];}
+        else if(act==='fan-swing'){service='oscillate';args.oscillating=!a.oscillating;}
+        if(service)call('fan',service,tile.eid,args,tile.name);return;
+      }
       if (tile.kind === 'light') {
         var ls = states[tile.eid], la = (ls && ls.attributes) || {}, isOn = ls && ls.state === 'on';
         if (act === 'bup') { if (isOn) call('light', 'turn_on', tile.eid, { brightness_step_pct: 20 }, tile.name + ' ☀'); else call('light', 'turn_on', tile.eid, { brightness_pct: 40 }, tile.name + ' 40%'); }
@@ -556,6 +633,7 @@
   }
   document.addEventListener('keydown', function (e) {
     var k = e.keyCode;
+    if(mapOverlay && !$('stream-view')){if(k===10009||k===27){closeMap();e.preventDefault();}return;}
     if ($('stream-view')) {
       if (k === 10009 || k === 27 || k === 13) closeCamera();
       e.preventDefault(); return;
