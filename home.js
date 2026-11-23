@@ -44,7 +44,11 @@ function hubHome(states, t, spotify, nameOf, areas, sceneList, haOrigin, energyH
   if (ac && ac.temperature != null) cooling.querySelector('small').textContent=nameOf(climate)+' · '+t('Target')+' '+ac.temperature+'°';
   const cameraBox=card('camera-card','Cameras','',String(cameras.length),'cameras');
   choices(cameraBox,cameras.slice(0,4).map(eid=>({eid,name:nameOf(eid).replace(/live view/i,'').trim()})),'camera');
-  cameraBox.querySelectorAll('.choice').forEach((item,i)=>picture(item,states[cameras[i]].attributes.entity_picture));
+  cameraBox.querySelectorAll('.choice').forEach((item,i)=>{
+    item.dataset.preview=cameras[i];
+    const short=nameOf(cameras[i]).replace(/live view/ig,'').replace(/\s*\([^)]*\)\s*$/,'').trim();
+    item.textContent=short;
+  });
   const meter=power.find(id=>/total|apartment|whole.house/i.test(id)) || power[0];
   const energy=card('','Energy',meter ? states[meter].state+' '+(states[meter].attributes.unit_of_measurement||'') : '—',meter ? nameOf(meter) : t('No reading'),'energy');
   if (meter) {
