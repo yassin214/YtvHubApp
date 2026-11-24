@@ -138,3 +138,8 @@ body {background:radial-gradient(ellipse at center,#061719,#020708 72%);}
 .home .hub-card small {font-size:18px;}
 .tab {padding-inline:9px;}
 .power-chart {height:63px;display:flex;align-items:flex-end;gap:3px;} .power-chart:empty {display:none;} .power-chart i {flex:1;background:linear-gradient(#28d6dc,#0b4c51);}
+
+.room-subtabs{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 18px}
+.room-subtab{background:#082127;color:#d9f7f7;border:1px solid #286975;border-radius:8px;font:inherit;padding:8px 15px}
+.room-subtab[aria-selected=true]{background:#11424b;border-color:#43e3ed}
+.room-subtab.sel{outline:3px solid #78faff}
