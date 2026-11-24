@@ -542,7 +542,7 @@
       var extra=ids.filter(e=>!claimed.has(e)).map(e=>{var room=roomName(lightArea(e)||'');
         return {name:rawName(e),room:roomAlias[room.toLowerCase()]||room,kind:dom(e),entities:[e],x:null,y:null,z:null};});
       var modelData=Object.assign({},privateMap,{devices:privateMap.devices.concat(extra)});
-      mapClose=FlatMap.mount(ov,modelData,{translate:display,close:closeMap,name:nameOf,state:e=>display(states[e]?.state||'unavailable'),resolve:resolve,
+      mapClose=FlatMap.mount(ov,modelData,{language:LANG,translate:display,close:closeMap,name:nameOf,state:e=>display(states[e]?.state||'unavailable'),resolve:resolve,
         action:e=>{if(dom(e)==='camera')return {label:'Live view',run:()=>openCamera(e)};
           if(['light','fan'].includes(dom(e)) && !HIDE_RX.test(e+' '+rawName(e)) && !(entLab[e]||[]).includes('not_in_room_rules'))return {label:'On / Off',run:()=>call(dom(e),'toggle',e,null,nameOf(e))};return null; }});
     }catch(e){if(mapOverlay===ov)ov.textContent=display('House map')+' · '+e.message+' · '+display('Return');}
