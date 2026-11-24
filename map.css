@@ -10,3 +10,12 @@
 .mapdetail {font-size:.84em;word-break:break-word;}.mini.m4 {right:244px;} [dir=rtl] .mini.m4 {right:auto;left:244px;}
 .tile[data-kind=map] {height:auto;width:100%;padding:12px 22px;margin:16px 0;color:#4de8dc;}
 
+
+.flatmap{grid-template-columns:minmax(0,3.2fr) minmax(320px,1fr)}
+.room-pins{position:absolute;inset:0;pointer-events:none}
+.floor-pin,.tray-pin,.room-tray button{background:#09282e;color:#e7ffff;border:2px solid #36bac3;border-radius:14px;padding:.3em .55em;font:inherit;line-height:1.1}
+.floor-pin{position:absolute;pointer-events:auto;font-size:clamp(15px,1.22vw,44px);max-width:19vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.room-tray{position:absolute;bottom:0;left:0;right:0;display:flex;gap:5px;overflow-x:auto;background:#071519e8;font-size:.74em}
+.room-tray[hidden],.room-pins[hidden]{display:none}
+.room-tray button{flex:none}
+.floor-pin:focus,.room-tray button:focus{outline:4px solid white;color:#001416;background:#51e5ec;z-index:3}
