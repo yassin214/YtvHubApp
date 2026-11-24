@@ -11,7 +11,7 @@
     document.body.style.zoom = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
   }
   fitScreen(); window.addEventListener('resize', fitScreen);
-  var VERSION = '2.6.1';
+  var VERSION = '2.7.1';
   var HUBQ = (location.search.match(/[?&]hub=([^&]+)/) || [])[1];            // dev/test override only (never set on the TV)
   var HUB = HUBQ ? decodeURIComponent(HUBQ) : 'http://192.168.3.96:8099';
   var DEMO = /[?&]demo\b/.test(location.search);
@@ -123,7 +123,7 @@
   }
   function loadAreas() {
     var areas = {}, devArea = {};
-    return request({ type: 'config/area_registry/list' }).then(function (a) { a.forEach(function (x) { areas[x.area_id] = x.name; }); }).catch(function () {})
+    return request({ type: 'config/area_registry/list' }).then(function (a) { a.forEach(function (x) { areas[x.area_id] = x.name;if(!areaNames.includes(x.name))areaNames.push(x.name); }); }).catch(function () {})
       .then(function () { return request({ type: 'config/device_registry/list' }).then(function (d) { d.forEach(function (x) { if (x.area_id) devArea[x.id] = x.area_id; devInfo[x.id] = { mf: x.manufacturer || '', model: x.model || '' }; }); }).catch(function () {}); })
       .then(function () { return request({ type: 'config/entity_registry/list_for_display' }).then(function (r) {
         (r.entities || []).forEach(function (e) {
@@ -137,6 +137,7 @@
     var had = !!states[d.entity_id];
     if (d.new_state) states[d.entity_id] = d.new_state; else delete states[d.entity_id];
     var dm = dom(d.entity_id);
+    if(page==='rooms'){if(had!==!!d.new_state)renderKeepSel();else{var key='roomdev|'+d.entity_id;if(model[key])refillAll();}return;}
     if ((page === 'security' && (dm === 'lock' || dm === 'alarm_control_panel')) || (page === 'cameras' && dm === 'camera') ||
         (page === 'energy' && dm === 'sensor' && (meterKind(d.old_state) || meterKind(d.new_state)))) {
       renderKeepSel();
@@ -236,12 +237,54 @@
     return sceneTiles().filter(function (t) { return dom(t.eid) === 'scene' || /snooze|home|away|sleep|leav/i.test(t.eid + nameOf(t.eid)); }).slice(0, 8)
       .map(function (t) { return { key: 'rt|' + t.key, kind: 'ent', eid: t.eid, name: t.name }; });
   }
+  var selectedRoom = '', areaNames = [], roomsLoading = false, nextRoomsRetry = 0;
+  var hardwareDomains = new Set('light switch fan climate vacuum camera media_player sensor binary_sensor cover lock alarm_control_panel remote siren humidifier water_heater valve device_tracker button number select event update'.split(' '));
+  function loadRoomDirectory() {
+    if (DEMO || privateMap || roomsLoading || Date.now()<nextRoomsRetry) return;
+    roomsLoading=true;
+    fetch(HUB+'/house-map.json',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error(r.status);return r.json();})
+      .then(function(map){privateMap=map;if(page==='rooms')renderKeepSel();})
+      .catch(function(){nextRoomsRetry=Date.now()+30000;}).finally(function(){roomsLoading=false;});
+  }
+  function roomSections(grid) {
+    loadRoomDirectory();
+    var directory=privateMap?.roomDirectory || {}, fallback=directory.entities || {};
+    var rooms=new Map(), unassigned='Unassigned';
+    function ensure(a){if(!rooms.has(a))rooms.set(a,[]);return rooms.get(a);}
+    (areaNames.length?areaNames:(directory.areas||[])).forEach(a=>ensure(roomName(a)));
+    var seen=new Set();
+    Object.keys(states).forEach(function(e){
+      var domain=dom(e);
+      if(!eligible(e)||!hardwareDomains.has(domain)||DUP_HIDE[e]||/_segment_\d+$/.test(e))return;
+      if(['sensor','binary_sensor','button','number','select','event','update','device_tracker'].includes(domain)&&!entDev[e]&&!entArea[e]&&!fallback[e])return;
+      var a=roomName(lightArea(e)||fallback[e]||unassigned);
+      var kind=domain==='light'?'light':domain==='vacuum'?'vac':'ent';
+      if((domain==='light'||domain==='fan')&&((entLab[e]||[]).includes('not_in_room_rules')||HIDE_RX.test(e+' '+rawName(e))))kind='roomStatus';
+      seen.add(e);
+      ensure(a).push({key:'roomdev|'+e,kind:kind,eid:e,name:nameOf(e),group:domain});
+    });
+    (directory.devices||[]).forEach(function(d,i){
+      if(d.entities.some(e=>seen.has(e)))return;
+      ensure(roomName(d.room)).push({key:'roomrecord|'+i,kind:'roomRecord',name:display(d.name),group:'device'});
+    });
+    var names=Array.from(rooms.keys()).sort((a,b)=>a===b?0:a==='Living Room'?-1:b==='Living Room'?1:a===unassigned?1:b===unassigned?-1:a.localeCompare(b));
+    if(!rooms.has(selectedRoom)&&selectedRoom!=='*')selectedRoom=names[0]||'';
+    var strip=el('div','room-subtabs');strip.setAttribute('role','tablist');grid.appendChild(strip);
+    names.concat('*').forEach(function(a){
+      var b=el('button','room-subtab nav',a==='*'?T('All lights'):a===unassigned?(LANG==='ar'?'غير معيّن':'Unassigned'):display(a));
+      b.dataset.kind='roomtab';b.dataset.room=a;b.dataset.key='roomtab|'+a;b.setAttribute('role','tab');b.setAttribute('aria-selected',String(a===selectedRoom));strip.appendChild(b);
+    });
+    if(selectedRoom==='*')return [{title:T('All lights'),tiles:roomTiles()}];
+    var items=rooms.get(selectedRoom)||[],groups=new Map();
+    items.sort((a,b)=>a.name.localeCompare(b.name)).forEach(function(t){if(!groups.has(t.group))groups.set(t.group,[]);groups.get(t.group).push(t);});
+    var titles={light:'Lights',fan:'Fans',climate:'Climate',vacuum:'Robots',camera:'Cameras',media_player:'Media',switch:'Switches',sensor:'Sensors',binary_sensor:'Binary sensors',device:'Devices',device_tracker:'Device trackers'};
+    var sections=Array.from(groups.keys()).sort().map(k=>({title:display(titles[k]||k.replace(/_/g,' ')),tiles:groups.get(k)}));
+    var lights=items.filter(t=>t.kind==='light').map(t=>t.eid);
+    if(lights.length)sections.unshift({title:display(selectedRoom),tiles:[{key:'roomlights|'+selectedRoom,kind:'room',name:T('All lights'),eids:lights}]});
+    return sections;
+  }
+
   function sectionsFor(p) {
-    if(p==='rooms'){
-      var panels=['light.living_room_nano_1','light.living_room_hexa'].filter(eligible);
-      return [{title:display('Rooms'),tiles:roomTiles()},{title:display('Living Room')+' · '+display('Nanoleaf'),
-        tiles:panels.map(e=>({key:'roompanel|'+e,kind:'light',eid:e,name:nameOf(e)}))}];
-    }
     if (p === 'devices') return deviceSections();
     if (p === 'cool') return [{ title: T('Cooling'), tiles: coolTiles() }];
     if (p === 'music') return [{ title: T('Music'), tiles: musicTiles() }, { title: T('Play on - one tap switches where Spotify plays'), tiles: sourceTiles() }];
@@ -260,6 +303,7 @@
   function fillTile(t, tile) {
     var cls = 'off', s, a, st = '', sub = tile.why || '';
     t.textContent = '';
+    if(tile.kind==='roomRecord'){t.className='tile nav off';t.append(el('div','name',tile.name),el('div','sub',LANG==='ar'?'جهاز مسجّل':'Registered device'));return;}
     if (tile.kind === 'room') {
       var on = tile.eids.filter(function (e) { return states[e] && states[e].state === 'on'; }).length;
       cls = on ? 'on' : 'off'; st = on ? (tile.eids.length > 1 ? on + ' of ' + tile.eids.length + ' on' : 'on') : 'off';
@@ -561,7 +605,7 @@
       var mapTile=el('div','tile nav',display('House map'));mapTile.dataset.kind='map';mapTile.dataset.key='house-map';g.insertBefore(mapTile,g.firstChild.nextSibling);
       g.appendChild(statusStrip());
     }
-    var secs = sectionsFor(page), count = 0;
+    var secs = page==='rooms'?roomSections(g):sectionsFor(page), count = 0;
     secs.forEach(function (sec) {
       if (!sec.tiles.length) return;
       g.appendChild(el('div', 'area', sec.title));
@@ -569,7 +613,7 @@
       sec.tiles.forEach(function (tile) { model[tile.key] = tile; var t = el('div', 'tile nav'); t.dataset.kind = 'tile'; t.dataset.key = tile.key; fillTile(t, tile); row.appendChild(t); count++; });
     });
     beacon('render', { page: page, tiles: count });
-    if (!count && page !== 'now') showMsg(T('Nothing to show here.'));
+    if(!count && page==='rooms')g.appendChild(el('div','msg',T('Nothing to show here.')));else if (!count && page !== 'now') showMsg(T('Nothing to show here.'));
     mark();
   }
   function renderKeepSel() { var top = $('grid').scrollTop; render(); $('grid').scrollTop = top; }
@@ -611,6 +655,7 @@
   }
   function activate() {
     var cur = curEl(); if (!cur) return;
+    if(cur.dataset.kind==='roomtab'){selectedRoom=cur.dataset.room;selKey=cur.dataset.key;render();$('grid').scrollTop=0;return;}
     if (cur.dataset.kind === 'map') {openMap();return;}
     if (cur.dataset.kind === 'home-scene') {
       var scene = sceneTiles().find(function(tile){return tile.eid === cur.dataset.key;});
@@ -663,6 +708,8 @@
       return;
     }
     var tl = model[cur.dataset.key]; if (!tl) return;
+    if(tl.kind==='roomRecord'||tl.kind==='roomStatus')return;
+    if(tl.eid&&dom(tl.eid)==='camera'){openCamera(tl.eid);return;}
     if (tl.kind === 'room') { var anyOn = tl.eids.some(function (e) { return states[e] && states[e].state === 'on'; }); call('light', anyOn ? 'turn_off' : 'turn_on', tl.eids, null, tl.name); return; }
     if (tl.kind === 'light') { var lst = states[tl.eid]; call('light', lst && lst.state === 'on' ? 'turn_off' : 'turn_on', tl.eid, null, tl.name); return; }
     if (tl.kind === 'vac') { var vs = states[tl.eid]; call('vacuum', vs && vs.state === 'cleaning' ? 'pause' : 'start', tl.eid, null, tl.name); return; }
